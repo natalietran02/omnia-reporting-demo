@@ -1,0 +1,38 @@
+name: Deploy to Apps Script
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install clasp
+        run: npm install -g @google/clasp
+
+      - name: Authenticate clasp
+        env:
+          CLASP_TOKEN: ${{ secrets.CLASP_TOKEN }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, json
+          token_str = os.environ['CLASP_TOKEN']
+          parsed = json.loads(token_str)
+          print('Token top-level keys:', list(parsed.keys()))
+          with open(os.path.expanduser('~/.clasprc.json'), 'w') as f:
+              json.dump(parsed, f)
+          print('Token written cleanly (no CRLF)')
+          PYEOF
+
+      - name: Push to Apps Script
+        run: clasp push --force
