@@ -3474,12 +3474,11 @@ function devCheckToken() {
 
 // ---------- GitHub PR Flow ----------
 
-// Intentionally not a real repo — this demo copy ships with no GITHUB_TOKEN
-// in Script Properties, so every call below throws before a request is ever
-// made. Point these at a real demo repo (with its own token) if you want the
-// "create fix PR" feature to actually work here.
-var GITHUB_OWNER = 'your-org';
-var GITHUB_REPO  = 'your-demo-repo';
+// This demo's own dedicated repo — isolated from the real production repo.
+// "Create fix PR" only works once GITHUB_TOKEN is set in Script Properties
+// (Project Settings → Script Properties) — see SeedDemo.js header comment.
+var GITHUB_OWNER = 'Edge-Red';
+var GITHUB_REPO  = 'omnia-reporting-demo';
 var GITHUB_API   = 'https://api.github.com';
 
 function getGitHubToken() {
