@@ -3476,7 +3476,7 @@ function devCheckToken() {
 
 // This demo's own dedicated repo — isolated from the real production repo.
 // "Create fix PR" only works once GITHUB_TOKEN is set in Script Properties
-// (Project Settings → Script Properties) — see SeedDemo.js header comment.
+// (Project Settings → Script Properties) — see Seed.js header comment.
 var GITHUB_OWNER = 'Edge-Red';
 var GITHUB_REPO  = 'omnia-reporting-demo';
 var GITHUB_API   = 'https://api.github.com';
