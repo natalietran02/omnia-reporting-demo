@@ -671,6 +671,8 @@ const FEEDBACK_HEADERS = ['timestamp', 'email', 'page', 'message'];
 function submitFeedback(user, p) {
   const message = String(p.message || '').trim();
   if (!message) throw new Error('Feedback message is required.');
+  const MAX_FEEDBACK_LENGTH = 2000;
+  if (message.length > MAX_FEEDBACK_LENGTH) throw new Error('Feedback message must be ' + MAX_FEEDBACK_LENGTH + ' characters or fewer.');
   const page = String(p.page || '').trim();
   const sh = ensureSheet(TABS.feedback, FEEDBACK_HEADERS);
   sh.appendRow([new Date(), user || '', page, message]);
