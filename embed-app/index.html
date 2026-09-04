@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Omnia Reporting — Demo</title>
+<style>
+  :root { color-scheme: light; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 14px -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: #f4f4f2; color: #1a1a18;
+    display: flex; flex-direction: column;
+  }
+  header {
+    padding: 14px 24px; background: #14201c; color: #eef4f0;
+    display: flex; align-items: center; justify-content: space-between;
+    flex: 0 0 auto;
+  }
+  header h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: .01em; }
+  header .sub { font-size: 12px; color: #9db3ab; margin-top: 2px; }
+  #signin-btn {
+    background: #2f7a63; color: #fff; border: none; border-radius: 6px;
+    padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  #signin-btn:hover { background: #35906f; }
+  #stage { flex: 1 1 auto; position: relative; }
+  #report-container { position: absolute; inset: 0; }
+  #placeholder {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px; color: #55605a; text-align: center; padding: 24px;
+  }
+  #placeholder.hidden { display: none; }
+  #error-box {
+    display: none; margin: 16px 24px; padding: 12px 16px; border-radius: 8px;
+    background: #fbe4e1; color: #7a2a20; font-size: 13px; white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Omnia Reporting</h1>
+      <div class="sub">Demo workspace — fabricated data</div>
+    </div>
+    <button id="signin-btn">Sign in to view</button>
+  </header>
+  <div id="error-box"></div>
+  <div id="stage">
+    <div id="placeholder">
+      <div>Sign in with your EdgeRed account to load the report.</div>
+    </div>
+    <div id="report-container"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.20.0/lib/msal-browser.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/powerbi-client@2.23.1/dist/powerbi.min.js"></script>
+  <script>
+    // ---- Fixed config for this demo report ----
+    var TENANT_ID = "dc65b585-fcd8-46a4-a44e-e7e871a725be"; // edgered.com.au
+    var CLIENT_ID = "REPLACE_WITH_APP_REGISTRATION_CLIENT_ID";
+    var WORKSPACE_ID = "bbbd2ec3-1085-4a2c-af8a-a0f82fa49f76";
+    var REPORT_ID = "e603cf2c-3ec0-4419-9d6c-1b5fa6c77eaf";
+    var POWERBI_SCOPE = "https://analysis.windows.net/powerbi/api/Report.Read.All";
+
+    var msalApp = new msal.PublicClientApplication({
+      auth: {
+        clientId: CLIENT_ID,
+        authority: "https://login.microsoftonline.com/" + TENANT_ID,
+        redirectUri: window.location.origin + window.location.pathname,
+      },
+      cache: { cacheLocation: "sessionStorage" },
+    });
+
+    var reportInstance = null;
+    var refreshTimer = null;
+
+    function showError(msg) {
+      var box = document.getElementById("error-box");
+      box.textContent = msg;
+      box.style.display = "block";
+    }
+
+    function setSignedInUi(account) {
+      var btn = document.getElementById("signin-btn");
+      btn.textContent = account ? "Signed in as " + account.username : "Sign in to view";
+      btn.disabled = !!account;
+    }
+
+    async function getToken(interactive) {
+      var accounts = msalApp.getAllAccounts();
+      var request = { scopes: [POWERBI_SCOPE], account: accounts[0] };
+      try {
+        var result = await msalApp.acquireTokenSilent(request);
+        return result.accessToken;
+      } catch (e) {
+        if (!interactive) throw e;
+        var result = await msalApp.loginPopup({ scopes: [POWERBI_SCOPE] });
+        setSignedInUi(result.account);
+        var silent = await msalApp.acquireTokenSilent({ scopes: [POWERBI_SCOPE], account: result.account });
+        return silent.accessToken;
+      }
+    }
+
+    async function embedReport(token) {
+      var models = window["powerbi-client"].models;
+      var container = document.getElementById("report-container");
+      var config = {
+        type: "report",
+        id: REPORT_ID,
+        embedUrl: "https://app.powerbi.com/reportEmbed?reportId=" + REPORT_ID + "&groupId=" + WORKSPACE_ID,
+        tokenType: models.TokenType.Aad,
+        accessToken: token,
+        settings: {
+          panes: { filters: { visible: false }, pageNavigation: { visible: true } },
+          background: models.BackgroundType.Transparent,
+        },
+      };
+      document.getElementById("placeholder").classList.add("hidden");
+      reportInstance = window.powerbi.embed(container, config);
+      reportInstance.off("error");
+      reportInstance.on("error", function (evt) {
+        showError("Report error: " + JSON.stringify(evt.detail));
+      });
+    }
+
+    async function refreshTokenLoop() {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(async function () {
+        try {
+          var token = await getToken(false);
+          if (reportInstance) await reportInstance.setAccessToken(token);
+        } catch (e) { /* silent refresh failed — user will notice on next interaction */ }
+        refreshTokenLoop();
+      }, 50 * 60 * 1000); // Power BI AAD tokens last ~60 min
+    }
+
+    async function signIn() {
+      try {
+        var token = await getToken(true);
+        await embedReport(token);
+        refreshTokenLoop();
+      } catch (e) {
+        showError("Sign-in or embed failed: " + (e && e.message ? e.message : e));
+      }
+    }
+
+    document.getElementById("signin-btn").addEventListener("click", signIn);
+
+    // Try a silent SSO on load in case the browser already has a session.
+    (async function () {
+      var accounts = msalApp.getAllAccounts();
+      if (accounts.length) {
+        setSignedInUi(accounts[0]);
+        try {
+          var token = await getToken(false);
+          await embedReport(token);
+          refreshTokenLoop();
+        } catch (e) { /* fall through to manual sign-in button */ }
+      }
+    })();
+  </script>
+</body>
+</html>
