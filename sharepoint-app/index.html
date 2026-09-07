@@ -1145,12 +1145,28 @@
 
     // ── Live SharePoint data source (Microsoft Graph) ───────────────────
     // Fill these in once the workbook is uploaded to SharePoint and the app
-    // is registered in Entra ID. Leave SHAREPOINT_SHARE_URL untouched to
-    // keep using the local fake-data generator instead.
-    var SHAREPOINT_SHARE_URL = "REPLACE_WITH_SHAREPOINT_SHARE_LINK";
+    // is registered in Entra ID. Leave the relevant placeholder(s) untouched
+    // to keep using the local fake-data generator instead.
+    //
+    // Two ways to grant access — pick one:
+    //   "shareLink"   Files.Read.All (broad — every file the signer-in can
+    //                 reach). Simpler: just needs a sharing link. Consent
+    //                 prompt reads "read all files you can access."
+    //   "filePicker"  Files.Read.Selected (narrow — only files the viewer
+    //                 explicitly picks via Microsoft's file picker, nothing
+    //                 else, ever). More moving parts, more places to break,
+    //                 and *unverified even more so* than shareLink mode —
+    //                 this whole demo's Graph calls have never been run
+    //                 live, and this path adds a second untested surface
+    //                 (postMessage handshake with Microsoft's picker page)
+    //                 on top of that. Test shareLink first.
+    var GRAPH_AUTH_MODE = "shareLink"; // "shareLink" | "filePicker"
+
+    var SHAREPOINT_SHARE_URL = "REPLACE_WITH_SHAREPOINT_SHARE_LINK"; // shareLink mode
+    var SHAREPOINT_HOSTNAME = "REPLACE_WITH_TENANT.sharepoint.com"; // filePicker mode, e.g. edgered.sharepoint.com
     var GRAPH_CLIENT_ID = "REPLACE_WITH_APP_REGISTRATION_CLIENT_ID";
     var GRAPH_TENANT_ID = "dc65b585-fcd8-46a4-a44e-e7e871a725be"; // edgered.com.au
-    var GRAPH_SCOPE = "Files.Read.All"; // delegated, user-consentable — no admin needed
+    var GRAPH_SCOPE = GRAPH_AUTH_MODE === "filePicker" ? "Files.Read.Selected" : "Files.Read.All";
 
     // Sheet name -> the DEMO_RAW key it fills, matching Omnia-Demo-Semantic-
     // Model-Data.xlsx exactly (dim_date is Power BI-only, not used here).
@@ -1215,22 +1231,113 @@
       return out;
     }
 
-    async function fetchSheetRows(token, shareId, sheetName) {
-      var url = 'https://graph.microsoft.com/v1.0/shares/' + shareId +
-        '/driveItem/workbook/worksheets(\'' + encodeURIComponent(sheetName) + '\')/usedRange(valuesOnly=true)';
+    async function fetchSheetRows(token, workbookBasePath, sheetName) {
+      var url = workbookBasePath +
+        '/workbook/worksheets(\'' + encodeURIComponent(sheetName) + '\')/usedRange(valuesOnly=true)';
       var resp = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
       if (!resp.ok) throw new Error(sheetName + ' — Graph ' + resp.status + ': ' + (await resp.text()));
       var json = await resp.json();
       return rowsFromUsedRange(json.values);
     }
 
+    // ── filePicker mode only: Files.Read.Selected workaround ────────────
+    // Narrower than Files.Read.All — the viewer explicitly picks the exact
+    // file via Microsoft's hosted file picker (postMessage protocol below),
+    // and the app can only ever read files picked that way. Picked item is
+    // cached in sessionStorage so returning viewers aren't asked to re-pick
+    // on every page load within the same tab session.
+    function getStoredPickedItem() {
+      try {
+        var raw = sessionStorage.getItem('sp_picked_item');
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) { return null; }
+    }
+    function storePickedItem(item) {
+      try { sessionStorage.setItem('sp_picked_item', JSON.stringify(item)); } catch (e) {}
+    }
+    function generateGuid() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    }
+
+    // Implements Microsoft's "File Picker v8" postMessage protocol — see
+    // learn.microsoft.com/onedrive/developer/controls/file-pickers. Opens
+    // the picker in a popup, hands it the same Graph token already acquired
+    // for Files.Read.Selected when it asks to authenticate, and resolves
+    // with the picked item's driveId/itemId once the viewer selects a file.
+    function launchFilePicker(token) {
+      return new Promise(function (resolve, reject) {
+        var channelId = generateGuid();
+        var options = {
+          sdk: '8.0',
+          entry: { oneDrive: { files: {} } },
+          authentication: {},
+          messaging: { origin: window.location.origin, channelId: channelId },
+          typesAndSources: { mode: 'files', filters: ['.xlsx'] },
+        };
+        var pickerUrl = 'https://' + SHAREPOINT_HOSTNAME +
+          '/_layouts/15/FilePicker.aspx?filePicker=' + encodeURIComponent(JSON.stringify(options));
+        var win = window.open(pickerUrl, 'OneDrive Picker', 'width=880,height=680');
+        if (!win) { reject(new Error('Popup blocked — allow popups for this site and retry.')); return; }
+
+        function cleanup() {
+          window.removeEventListener('message', onMessage);
+          try { win.close(); } catch (e) {}
+        }
+        function onMessage(event) {
+          if (!win || event.source !== win) return;
+          var message = event.data;
+          if (!message || !message.type) return;
+          if (message.type === 'notification' && message.data && message.data.notification === 'page-loaded') {
+            win.postMessage({ type: 'initialize', channelId: channelId }, '*');
+            return;
+          }
+          if (message.type !== 'command') return;
+          win.postMessage({ type: 'acknowledge', id: message.id }, event.origin);
+          var command = message.data && message.data.command;
+          if (command === 'authenticate') {
+            win.postMessage({ type: 'result', id: message.id, data: { result: 'token', token: token } }, event.origin);
+          } else if (command === 'close') {
+            cleanup();
+            reject(new Error('File picker closed without a selection.'));
+          } else if (command === 'pick') {
+            var item = message.data.items && message.data.items[0];
+            win.postMessage({ type: 'result', id: message.id, data: { result: 'success' } }, event.origin);
+            cleanup();
+            if (!item) { reject(new Error('Picker returned no item.')); return; }
+            resolve({
+              driveId: item.parentReference && item.parentReference.driveId,
+              itemId: item.id,
+              name: item.name,
+            });
+          }
+        }
+        window.addEventListener('message', onMessage);
+      });
+    }
+
+    async function resolveWorkbookBasePath(token) {
+      if (GRAPH_AUTH_MODE === 'filePicker') {
+        var picked = getStoredPickedItem();
+        if (!picked) {
+          picked = await launchFilePicker(token);
+          storePickedItem(picked);
+        }
+        return 'https://graph.microsoft.com/v1.0/drives/' + picked.driveId + '/items/' + picked.itemId;
+      }
+      var shareId = encodeSharingUrl(SHAREPOINT_SHARE_URL);
+      return 'https://graph.microsoft.com/v1.0/shares/' + shareId + '/driveItem';
+    }
+
     async function fetchLiveRawData() {
       var token = await getGraphToken();
-      var shareId = encodeSharingUrl(SHAREPOINT_SHARE_URL);
+      var basePath = await resolveWorkbookBasePath(token);
       var raw = {};
       var keys = Object.keys(SHAREPOINT_SHEET_MAP);
       for (var i = 0; i < keys.length; i++) {
-        raw[keys[i]] = await fetchSheetRows(token, shareId, SHAREPOINT_SHEET_MAP[keys[i]]);
+        raw[keys[i]] = await fetchSheetRows(token, basePath, SHAREPOINT_SHEET_MAP[keys[i]]);
       }
       return raw;
     }
@@ -1250,7 +1357,11 @@
       // executing before onDataLoaded/onWhoAmI ever run.
       setTimeout(async function () {
         var data = DEMO_RAW, sourceLabel = 'Sample data (offline)';
-        var liveConfigured = SHAREPOINT_SHARE_URL.indexOf('REPLACE_') === -1 && GRAPH_CLIENT_ID.indexOf('REPLACE_') === -1;
+        var liveConfigured = GRAPH_CLIENT_ID.indexOf('REPLACE_') === -1 && (
+          GRAPH_AUTH_MODE === 'filePicker'
+            ? SHAREPOINT_HOSTNAME.indexOf('REPLACE_') === -1
+            : SHAREPOINT_SHARE_URL.indexOf('REPLACE_') === -1
+        );
         if (liveConfigured) {
           try {
             data = await fetchLiveRawData();
