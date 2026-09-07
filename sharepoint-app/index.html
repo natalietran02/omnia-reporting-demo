@@ -1184,7 +1184,7 @@
     };
 
     var msalApp = null;
-    function getMsalApp() {
+    async function getMsalApp() {
       if (!msalApp) {
         msalApp = new msal.PublicClientApplication({
           auth: {
@@ -1194,12 +1194,14 @@
           },
           cache: { cacheLocation: 'sessionStorage' },
         });
+        // MSAL Browser v3 requires this to complete before any other MSAL call.
+        await msalApp.initialize();
       }
       return msalApp;
     }
 
     async function getGraphToken() {
-      var app = getMsalApp();
+      var app = await getMsalApp();
       var accounts = app.getAllAccounts();
       try {
         var silent = await app.acquireTokenSilent({ scopes: [GRAPH_SCOPE], account: accounts[0] });

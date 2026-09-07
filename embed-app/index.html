@@ -71,6 +71,8 @@
       },
       cache: { cacheLocation: "sessionStorage" },
     });
+    // MSAL Browser v3 requires this to complete before any other MSAL call.
+    var msalReady = msalApp.initialize();
 
     var reportInstance = null;
     var refreshTimer = null;
@@ -88,6 +90,7 @@
     }
 
     async function getToken(interactive) {
+      await msalReady;
       var accounts = msalApp.getAllAccounts();
       var request = { scopes: [POWERBI_SCOPE], account: accounts[0] };
       try {
@@ -149,6 +152,7 @@
 
     // Try a silent SSO on load in case the browser already has a session.
     (async function () {
+      await msalReady;
       var accounts = msalApp.getAllAccounts();
       if (accounts.length) {
         setSignedInUi(accounts[0]);
