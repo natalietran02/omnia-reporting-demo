@@ -26,8 +26,15 @@ jobs:
         run: |
           python3 - <<'PYEOF'
           import os, json
-          token_str = os.environ['CLASP_TOKEN']
-          parsed = json.loads(token_str)
+          token_str = os.environ.get('CLASP_TOKEN', '')
+          if not token_str:
+              print('Error: CLASP_TOKEN secret is not set')
+              exit(1)
+          try:
+              parsed = json.loads(token_str)
+          except json.JSONDecodeError as e:
+              print(f'Error: CLASP_TOKEN is not valid JSON: {e}')
+              exit(1)
           print('Token top-level keys:', list(parsed.keys()))
           with open(os.path.expanduser('~/.clasprc.json'), 'w') as f:
               json.dump(parsed, f)
