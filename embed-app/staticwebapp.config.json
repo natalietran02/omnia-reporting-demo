@@ -1,1 +1,1 @@
-{"navigationFallback":{"rewrite":"/index.html"},"auth":{"rolesSource":"/api/getRolesForUsers","identityProviders":{"azureActiveDirectory":{"registration":{"openIdIssuer":"https://login.microsoftonline.com/dc65b585-fcd8-46a4-a44e-e7e871a725be","clientIdSettingName":"AZURE_CLIENT_ID","clientSecretSettingName":"AZURE_CLIENT_SECRET_APP_SETTING_NAME"}}}}}
+{"navigationFallback":{"rewrite":"/index.html"}}
