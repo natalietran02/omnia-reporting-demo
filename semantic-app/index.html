@@ -34,6 +34,21 @@
   }
   #signin-btn:hover { background: #35906f; }
   #signin-btn:disabled { cursor: default; opacity: .85; }
+  #manage-access-btn {
+    background: transparent; color: #eef4f0; border: 1px solid #35493f; border-radius: 6px;
+    padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  #manage-access-btn:hover { background: #1c2b25; }
+  .access-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 9px 0; border-bottom: 1px solid #eceeec; font-size: 13px;
+  }
+  .access-row:last-child { border-bottom: none; }
+  .access-role-chip {
+    font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+    text-transform: uppercase; background: #eaf3ee; color: #14201c; flex-shrink: 0;
+  }
+  .access-role-chip.admin { background: #14201c; color: #fff; }
 
   #stage { flex: 1 1 auto; position: relative; overflow: auto; }
   #placeholder {
@@ -175,6 +190,7 @@
           <select id="opco-select"></select>
         </div>
       </div>
+      <button id="manage-access-btn" style="display:none;" title="Manage who can view this dashboard">Manage access</button>
       <button id="signin-btn">Sign in to view</button>
     </div>
   </header>
@@ -195,6 +211,34 @@
       <div class="feedback-modal-foot">
         <button class="feedback-btn feedback-btn-ghost" id="feedback-cancel-btn">Cancel</button>
         <button class="feedback-btn feedback-btn-primary" id="feedback-send-btn">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="access-modal-overlay" class="feedback-modal-overlay">
+    <div class="feedback-modal" style="max-width:480px;">
+      <div class="feedback-modal-head">
+        <h3>Manage access</h3>
+        <button class="feedback-modal-close" id="access-close-btn">&#10005;</button>
+      </div>
+      <div class="feedback-modal-body">
+        <div style="font-size:11.5px; color:#6b756f; margin-bottom:10px;">Controls who can sign in and view this dashboard at all.</div>
+        <div id="access-list"></div>
+        <div style="margin-top:16px; padding-top:14px; border-top:1px solid #eceeec;">
+          <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#55655d; display:block; margin-bottom:6px;">Add / update person — email</label>
+          <input type="email" id="access-add-email" placeholder="name@edgered.com.au"
+            style="width:100%; padding:8px 10px; border:1px solid #c8d6cd; border-radius:6px; margin-bottom:10px; box-sizing:border-box; font-size:13px;">
+          <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#55655d; display:block; margin-bottom:6px;">Role</label>
+          <select id="access-add-role" style="width:100%; padding:8px 10px; border:1px solid #c8d6cd; border-radius:6px; font-size:13px;">
+            <option value="user">user — can view</option>
+            <option value="admin">admin — can also manage access</option>
+          </select>
+          <div id="access-status" class="feedback-status"></div>
+        </div>
+      </div>
+      <div class="feedback-modal-foot">
+        <button class="feedback-btn feedback-btn-ghost" id="access-close-btn-2">Close</button>
+        <button class="feedback-btn feedback-btn-primary" id="access-save-btn">Add / Update</button>
       </div>
     </div>
   </div>
@@ -258,6 +302,18 @@
     var FEEDBACK_TABLE_NAME = "FeedbackTable";
     var FEEDBACK_NOTIFY_EMAIL = "natalie@edgered.com.au";
     var feedbackConfigured = !!(FEEDBACK_DRIVE_ID && FEEDBACK_ITEM_ID);
+
+    // ---- Access allowlist (who may sign in and view this dashboard) ----
+    // Stored as a second table in the same workbook as feedback — no new
+    // Graph permission needed, since Files.ReadWrite.All already covers it.
+    // BOOTSTRAP_ADMIN_EMAILS always pass the check regardless of what's in
+    // the sheet (even if the sheet is empty, missing, or unreachable) — this
+    // is what prevents a chicken-and-egg lockout on first use, mirroring the
+    // Apps Script version's ADMIN_EMAIL/seedInitialAccessUsers() pattern.
+    // Bootstrap admins use the Manage Access panel to add everyone else.
+    var BOOTSTRAP_ADMIN_EMAILS = ["natalie@edgered.com.au"];
+    var ACCESS_SHEET_NAME = "AccessUsers";
+    var ACCESS_TABLE_NAME = "AccessUsersTable";
 
     var PIE_COLORS = ["#14201c", "#7c8f89", "#3d7373", "#bfe0cd", "#2f7a63", "#a9c9b8"];
 
@@ -551,6 +607,122 @@
       } catch (e) {
         console.warn("Feedback saved, but the notification email failed:", e);
       }
+    }
+
+    // ---- Access allowlist (Microsoft Graph → same workbook) ----
+    function isBootstrapAdmin(email) {
+      return BOOTSTRAP_ADMIN_EMAILS.indexOf(String(email || "").toLowerCase()) !== -1;
+    }
+
+    // Creates the AccessUsers worksheet + table on first-ever use, same
+    // pattern as ensureFeedbackTable.
+    async function ensureAccessUsersTable(token, basePath) {
+      var checkResp = await fetch(
+        basePath + "/workbook/tables('" + ACCESS_TABLE_NAME + "')",
+        { headers: { Authorization: "Bearer " + token } }
+      );
+      if (checkResp.ok) return;
+
+      await fetch(basePath + "/workbook/worksheets/add", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: ACCESS_SHEET_NAME }),
+      });
+
+      var headerRange = "A1:E1";
+      await fetch(
+        basePath + "/workbook/worksheets('" + encodeURIComponent(ACCESS_SHEET_NAME) + "')/range(address='" + headerRange + "')",
+        {
+          method: "PATCH",
+          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+          body: JSON.stringify({ values: [["Email", "Role", "Status", "AddedBy", "AddedAt"]] }),
+        }
+      );
+
+      var tableResp = await fetch(
+        basePath + "/workbook/worksheets('" + encodeURIComponent(ACCESS_SHEET_NAME) + "')/tables/add",
+        {
+          method: "POST",
+          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+          body: JSON.stringify({ address: headerRange, hasHeaders: true }),
+        }
+      );
+      if (!tableResp.ok) throw new Error("Could not create the AccessUsers table (Graph " + tableResp.status + ")");
+      var table = await tableResp.json();
+
+      await fetch(basePath + "/workbook/tables('" + table.id + "')", {
+        method: "PATCH",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: ACCESS_TABLE_NAME }),
+      });
+    }
+
+    // Each returned row carries its table-relative `index` (needed to PATCH
+    // that exact row later via rows/itemAt) alongside the parsed fields.
+    async function fetchAccessUsersRows(token, basePath) {
+      var resp = await fetch(basePath + "/workbook/tables('" + ACCESS_TABLE_NAME + "')/rows", {
+        headers: { Authorization: "Bearer " + token },
+      });
+      if (!resp.ok) throw new Error("Could not read the access list (Graph " + resp.status + ")");
+      var data = await resp.json();
+      return (data.value || []).map(function (r, idx) {
+        var v = r.values[0];
+        return {
+          index: idx,
+          email: String(v[0] || "").toLowerCase(),
+          role: v[1] || "user",
+          status: v[2] || "active",
+          addedBy: v[3] || "",
+          addedAt: v[4] || "",
+        };
+      });
+    }
+
+    // Returns { allowed, role }. Bootstrap admins always pass without even
+    // touching the sheet, so a broken/unreachable AccessUsers table can
+    // never lock out the people who'd need to fix it.
+    async function checkAccess(token, basePath, email) {
+      email = String(email || "").toLowerCase();
+      if (isBootstrapAdmin(email)) return { allowed: true, role: "admin" };
+      await ensureAccessUsersTable(token, basePath);
+      var rows = await fetchAccessUsersRows(token, basePath);
+      var row = rows.filter(function (r) { return r.email === email; })[0];
+      if (!row || row.status !== "active") return { allowed: false, role: null };
+      return { allowed: true, role: row.role === "admin" ? "admin" : "user" };
+    }
+
+    async function upsertAccessUser(token, basePath, email, role, addedBy) {
+      email = String(email).trim().toLowerCase();
+      await ensureAccessUsersTable(token, basePath);
+      var rows = await fetchAccessUsersRows(token, basePath);
+      var existing = rows.filter(function (r) { return r.email === email; })[0];
+      var values = [[email, role, "active", addedBy, new Date().toISOString()]];
+      if (existing) {
+        await fetch(basePath + "/workbook/tables('" + ACCESS_TABLE_NAME + "')/rows/itemAt(index=" + existing.index + ")", {
+          method: "PATCH",
+          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+          body: JSON.stringify({ values: values }),
+        });
+      } else {
+        await fetch(basePath + "/workbook/tables('" + ACCESS_TABLE_NAME + "')/rows/add", {
+          method: "POST",
+          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+          body: JSON.stringify({ values: values }),
+        });
+      }
+    }
+
+    async function deactivateAccessUser(token, basePath, email) {
+      email = String(email).trim().toLowerCase();
+      var rows = await fetchAccessUsersRows(token, basePath);
+      var existing = rows.filter(function (r) { return r.email === email; })[0];
+      if (!existing) return;
+      var values = [[existing.email, existing.role, "inactive", existing.addedBy, existing.addedAt]];
+      await fetch(basePath + "/workbook/tables('" + ACCESS_TABLE_NAME + "')/rows/itemAt(index=" + existing.index + ")", {
+        method: "PATCH",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ values: values }),
+      });
     }
 
     // ---- Formatting helpers ----
@@ -906,6 +1078,7 @@
 
     // ---- App state ----
     var RAW = { revenue: [], projects: [], deals: [], utilisation: [], certifications: [], targetRates: [] };
+    var CURRENT_SESSION = { email: null, role: null };
 
     function parseRevenueRows(rows) {
       return rows.map(function (r) {
@@ -1635,6 +1808,133 @@
       document.getElementById("feedback-fab").classList.add("visible");
     }
 
+    function showAccessDenied(email) {
+      var placeholder = document.getElementById("placeholder");
+      placeholder.innerHTML = "<div>" + escapeHtml(email) + " isn't on the access list for this dashboard yet.<br>Ask an admin to add you via Manage Access.</div>";
+      placeholder.classList.remove("hidden");
+      document.getElementById("app").classList.remove("visible");
+    }
+
+    // Checks the access allowlist (Graph token is separate from the Power BI
+    // one already acquired for `powerBiToken`), then either loads the report
+    // or shows the access-denied placeholder instead. Shared by the manual
+    // sign-in button and the silent auto-sign-in attempt below.
+    async function gateAccessAndLoad(account, powerBiToken) {
+      var access;
+      try {
+        var graphToken = await getFeedbackGraphToken();
+        access = await checkAccess(graphToken, feedbackWorkbookBasePath(), account.username);
+      } catch (e) {
+        showError("Could not verify dashboard access: " + (e && e.message ? e.message : e));
+        return;
+      }
+      if (!access.allowed) {
+        showAccessDenied(account.username);
+        return;
+      }
+      CURRENT_SESSION.email = account.username;
+      CURRENT_SESSION.role = access.role;
+      document.getElementById("manage-access-btn").style.display = access.role === "admin" ? "inline-block" : "none";
+      await loadReport(powerBiToken);
+    }
+
+    // ---- Manage access modal wiring ----
+    (function () {
+      var btn = document.getElementById("manage-access-btn");
+      var overlay = document.getElementById("access-modal-overlay");
+      var listEl = document.getElementById("access-list");
+      var emailInput = document.getElementById("access-add-email");
+      var roleSelect = document.getElementById("access-add-role");
+      var status = document.getElementById("access-status");
+      var saveBtn = document.getElementById("access-save-btn");
+
+      function renderRows(rows) {
+        if (!rows.length) {
+          listEl.innerHTML = '<div style="font-size:12.5px; color:#8a938d;">No one added yet — you (as a bootstrap admin) are still the only one who can sign in.</div>';
+          return;
+        }
+        listEl.innerHTML = rows.map(function (r) {
+          var isSelf = r.email === (CURRENT_SESSION.email || "").toLowerCase();
+          var actionBtn = r.status === "active"
+            ? (isSelf ? '<span style="font-size:11px; color:#8a938d;">(you)</span>' : '<button class="feedback-btn feedback-btn-ghost" data-deactivate="' + escapeHtml(r.email) + '" style="padding:4px 10px; font-size:11px;">Deactivate</button>')
+            : '<span style="font-size:11px; color:#8a938d;">Deactivated</span>';
+          return '<div class="access-row"><div>' + escapeHtml(r.email) + '</div>' +
+            '<div style="display:flex; align-items:center; gap:8px;">' +
+            '<span class="access-role-chip' + (r.role === "admin" ? " admin" : "") + '">' + escapeHtml(r.role) + '</span>' +
+            actionBtn + '</div></div>';
+        }).join("");
+      }
+
+      async function refreshList() {
+        listEl.innerHTML = '<div style="font-size:12.5px; color:#8a938d;">Loading…</div>';
+        var token = await getFeedbackGraphToken();
+        var basePath = feedbackWorkbookBasePath();
+        await ensureAccessUsersTable(token, basePath);
+        var rows = await fetchAccessUsersRows(token, basePath);
+        renderRows(rows);
+      }
+
+      function openModal() {
+        emailInput.value = "";
+        roleSelect.value = "user";
+        status.textContent = "";
+        status.className = "feedback-status";
+        overlay.classList.add("open");
+        refreshList().catch(function (e) {
+          listEl.innerHTML = '<div class="feedback-status error">' + escapeHtml(e && e.message ? e.message : String(e)) + "</div>";
+        });
+      }
+      function closeModal() { overlay.classList.remove("open"); }
+
+      btn.addEventListener("click", openModal);
+      document.getElementById("access-close-btn").addEventListener("click", closeModal);
+      document.getElementById("access-close-btn-2").addEventListener("click", closeModal);
+      overlay.addEventListener("click", function (e) { if (e.target === overlay) closeModal(); });
+
+      saveBtn.addEventListener("click", async function () {
+        var email = emailInput.value.trim();
+        if (!email) {
+          status.textContent = "Enter an email first.";
+          status.className = "feedback-status error";
+          return;
+        }
+        saveBtn.disabled = true;
+        status.textContent = "";
+        status.className = "feedback-status";
+        try {
+          var token = await getFeedbackGraphToken();
+          var basePath = feedbackWorkbookBasePath();
+          await upsertAccessUser(token, basePath, email, roleSelect.value, CURRENT_SESSION.email);
+          emailInput.value = "";
+          status.textContent = "Saved.";
+          status.className = "feedback-status ok";
+          await refreshList();
+        } catch (e) {
+          status.textContent = (e && e.message) ? e.message : String(e);
+          status.className = "feedback-status error";
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+
+      listEl.addEventListener("click", async function (e) {
+        var target = e.target.closest("[data-deactivate]");
+        if (!target) return;
+        var email = target.getAttribute("data-deactivate");
+        target.disabled = true;
+        target.textContent = "Deactivating…";
+        try {
+          var token = await getFeedbackGraphToken();
+          var basePath = feedbackWorkbookBasePath();
+          await deactivateAccessUser(token, basePath, email);
+          await refreshList();
+        } catch (e2) {
+          status.textContent = (e2 && e2.message) ? e2.message : String(e2);
+          status.className = "feedback-status error";
+        }
+      });
+    })();
+
     // ---- Feedback modal wiring ----
     (function () {
       var fab = document.getElementById("feedback-fab");
@@ -1688,7 +1988,9 @@
     async function signIn() {
       try {
         var token = await getToken(true);
-        await loadReport(token);
+        var account = msalApp.getAllAccounts()[0];
+        setSignedInUi(account);
+        await gateAccessAndLoad(account, token);
       } catch (e) {
         showError("Sign-in or data load failed: " + (e && e.message ? e.message : e));
       }
@@ -1703,7 +2005,7 @@
         setSignedInUi(accounts[0]);
         try {
           var token = await getToken(false);
-          await loadReport(token);
+          await gateAccessAndLoad(accounts[0], token);
         } catch (e) { /* fall through to manual sign-in button */ }
       }
     })();
