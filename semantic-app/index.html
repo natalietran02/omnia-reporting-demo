@@ -126,6 +126,36 @@
     .panels-grid { grid-template-columns: 1fr; }
     .client-panels { grid-template-columns: 1fr; }
   }
+
+  .feedback-fab {
+    position: fixed; bottom: 24px; left: 24px; width: 50px; height: 50px; border-radius: 50%;
+    background: #14201c; color: #eef4f0; border: none; cursor: pointer; font-size: 20px;
+    box-shadow: 0 6px 16px rgba(0,0,0,.28); z-index: 500; display: none; align-items: center; justify-content: center;
+  }
+  .feedback-fab.visible { display: flex; }
+  .feedback-fab:hover { background: #1c2b25; }
+  .feedback-modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(20,32,28,.55); z-index: 600;
+    align-items: center; justify-content: center; padding: 20px;
+  }
+  .feedback-modal-overlay.open { display: flex; }
+  .feedback-modal { background: #fff; border-radius: 10px; width: 100%; max-width: 440px; box-shadow: 0 16px 40px rgba(0,0,0,.3); overflow: hidden; }
+  .feedback-modal-head { background: #14201c; color: #eef4f0; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; }
+  .feedback-modal-head h3 { margin: 0; font-size: 14px; font-weight: 700; }
+  .feedback-modal-close { background: transparent; border: none; color: #9db3ab; font-size: 16px; cursor: pointer; }
+  .feedback-modal-body { padding: 16px 18px; }
+  .feedback-modal-body textarea {
+    width: 100%; min-height: 110px; padding: 10px 12px; border: 1px solid #c8d6cd; border-radius: 8px;
+    font: 13px inherit; box-sizing: border-box; resize: vertical;
+  }
+  .feedback-status { font-size: 12px; margin-top: 8px; min-height: 16px; }
+  .feedback-status.error { color: #c0392b; }
+  .feedback-status.ok { color: #2f7a63; }
+  .feedback-modal-foot { padding: 12px 18px; background: #f4f4f2; display: flex; justify-content: flex-end; gap: 8px; }
+  .feedback-btn { padding: 8px 14px; border-radius: 6px; font-size: 12.5px; font-weight: 700; cursor: pointer; border: none; }
+  .feedback-btn-ghost { background: #e4e9e6; color: #14201c; }
+  .feedback-btn-primary { background: #2f7a63; color: #fff; }
+  .feedback-btn-primary:disabled { opacity: .6; cursor: default; }
 </style>
 </head>
 <body>
@@ -150,6 +180,25 @@
   </header>
   <div id="error-box"></div>
   <div id="chart-tooltip" class="chart-tooltip"></div>
+
+  <button id="feedback-fab" class="feedback-fab" title="Send feedback">&#128172;</button>
+  <div id="feedback-modal-overlay" class="feedback-modal-overlay">
+    <div class="feedback-modal">
+      <div class="feedback-modal-head">
+        <h3>Send feedback</h3>
+        <button class="feedback-modal-close" id="feedback-close-btn">&#10005;</button>
+      </div>
+      <div class="feedback-modal-body">
+        <textarea id="feedback-message" placeholder="What's on your mind?"></textarea>
+        <div id="feedback-status" class="feedback-status"></div>
+      </div>
+      <div class="feedback-modal-foot">
+        <button class="feedback-btn feedback-btn-ghost" id="feedback-cancel-btn">Cancel</button>
+        <button class="feedback-btn feedback-btn-primary" id="feedback-send-btn">Send</button>
+      </div>
+    </div>
+  </div>
+
   <div id="stage">
     <div id="placeholder">
       <div>Sign in with your EdgeRed account to load the report.</div>
@@ -183,6 +232,21 @@
     var WORKSPACE_ID = "bbbd2ec3-1085-4a2c-af8a-a0f82fa49f76";
     var DATASET_ID = "8c11a7f7-0992-4591-b51a-50889e641617"; // "Omnia Reporting Demo" semantic model
     var POWERBI_SCOPE = "https://analysis.windows.net/powerbi/api/Dataset.Read.All";
+
+    // Feedback writes to a dedicated Excel workbook via Microsoft Graph — a
+    // separate concern from the Power BI dataset query above, since it needs
+    // Graph's Files.ReadWrite scope (not Dataset.Read.All) and a real Excel
+    // file to write into. REPLACE_WITH_FEEDBACK_WORKBOOK_SHARE_LINK below
+    // must become a real "anyone in the org with the link can edit" sharing
+    // link to an .xlsx file before feedback will actually save anywhere —
+    // until then the feedback button shows a clear error instead of silently
+    // losing submissions. The app registration (CLIENT_ID above) also needs
+    // the Files.ReadWrite delegated Graph permission added and consented.
+    var FEEDBACK_SHARE_URL = "REPLACE_WITH_FEEDBACK_WORKBOOK_SHARE_LINK";
+    var FEEDBACK_GRAPH_SCOPE = "https://graph.microsoft.com/Files.ReadWrite";
+    var FEEDBACK_SHEET_NAME = "Feedback";
+    var FEEDBACK_TABLE_NAME = "FeedbackTable";
+    var feedbackConfigured = FEEDBACK_SHARE_URL.indexOf("REPLACE_") === -1;
 
     var PIE_COLORS = ["#14201c", "#7c8f89", "#3d7373", "#bfe0cd", "#2f7a63", "#a9c9b8"];
 
@@ -340,6 +404,111 @@
         results.push(await executeDaxQuery(token, queries[i]));
       }
       return results;
+    }
+
+    // ---- Feedback (Microsoft Graph → Excel workbook) ----
+    // Microsoft's documented scheme for turning a sharing URL into a Graph
+    // "shares/{id}" token — see learn.microsoft.com/graph/api/shares-get.
+    function encodeSharingUrl(url) {
+      var b64 = btoa(unescape(encodeURIComponent(url)));
+      var unpadded = b64.replace(/=+$/, "").replace(/\//g, "_").replace(/\+/g, "-");
+      return "u!" + unpadded;
+    }
+
+    // Separate token acquisition from getToken() above — this needs Graph's
+    // Files.ReadWrite scope, not the Power BI Dataset.Read.All one, so it's
+    // requested (and consented) independently. Falls back to an interactive
+    // popup only when the silent attempt fails (e.g. first-ever use, before
+    // this scope has been consented for this account).
+    async function getFeedbackGraphToken() {
+      await msalReady;
+      var accounts = msalApp.getAllAccounts();
+      var request = { scopes: [FEEDBACK_GRAPH_SCOPE], account: accounts[0] };
+      try {
+        var result = await msalApp.acquireTokenSilent(request);
+        return result.accessToken;
+      } catch (e) {
+        var interactive = await msalApp.acquireTokenPopup(request);
+        return interactive.accessToken;
+      }
+    }
+
+    async function feedbackWorkbookBasePath() {
+      var shareId = encodeSharingUrl(FEEDBACK_SHARE_URL);
+      return "https://graph.microsoft.com/v1.0/shares/" + shareId + "/driveItem";
+    }
+
+    // Creates the Feedback worksheet + table on first-ever submission if they
+    // don't exist yet, so nobody has to hand-build the sheet structure before
+    // this works. Safe to call on every submission — it's a no-op once the
+    // table is already there.
+    async function ensureFeedbackTable(token, basePath) {
+      var checkResp = await fetch(
+        basePath + "/workbook/tables('" + FEEDBACK_TABLE_NAME + "')",
+        { headers: { Authorization: "Bearer " + token } }
+      );
+      if (checkResp.ok) return;
+
+      await fetch(basePath + "/workbook/worksheets/add", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: FEEDBACK_SHEET_NAME }),
+      });
+
+      var headerRange = "A1:E1";
+      await fetch(
+        basePath + "/workbook/worksheets('" + encodeURIComponent(FEEDBACK_SHEET_NAME) + "')/range(address='" + headerRange + "')",
+        {
+          method: "PATCH",
+          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+          body: JSON.stringify({ values: [["Timestamp", "SubmittedBy", "Page", "OpCoFilter", "Message"]] }),
+        }
+      );
+
+      var tableResp = await fetch(
+        basePath + "/workbook/worksheets('" + encodeURIComponent(FEEDBACK_SHEET_NAME) + "')/tables/add",
+        {
+          method: "POST",
+          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+          body: JSON.stringify({ address: headerRange, hasHeaders: true }),
+        }
+      );
+      if (!tableResp.ok) throw new Error("Could not create the Feedback table (Graph " + tableResp.status + ")");
+      var table = await tableResp.json();
+
+      // Name it so the checkResp lookup above (by FEEDBACK_TABLE_NAME) finds
+      // it on every later call, instead of Graph's auto-generated "Table1".
+      await fetch(basePath + "/workbook/tables('" + table.id + "')", {
+        method: "PATCH",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: FEEDBACK_TABLE_NAME }),
+      });
+    }
+
+    async function submitFeedbackRow(message) {
+      if (!feedbackConfigured) {
+        throw new Error("Feedback isn't connected to a workbook yet — set FEEDBACK_SHARE_URL in the page source first.");
+      }
+      var token = await getFeedbackGraphToken();
+      var basePath = await feedbackWorkbookBasePath();
+      await ensureFeedbackTable(token, basePath);
+
+      var accounts = msalApp.getAllAccounts();
+      var submittedBy = accounts[0] ? accounts[0].username : "unknown";
+      var activeTab = document.querySelector(".tab-btn.active");
+      var pageLabel = activeTab ? activeTab.textContent : "";
+      var opco = document.getElementById("opco-select") ? currentOpco() : "All";
+
+      var row = [new Date().toISOString(), submittedBy, pageLabel, opco, message];
+      var addResp = await fetch(basePath + "/workbook/tables('" + FEEDBACK_TABLE_NAME + "')/rows/add", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ values: [row] }),
+      });
+      if (!addResp.ok) {
+        var text = await addResp.text();
+        throw new Error("Could not save feedback (Graph " + addResp.status + "): " + text);
+      }
     }
 
     // ---- Formatting helpers ----
@@ -1421,7 +1590,58 @@
       RAW.targetRates = parseTargetRateRows(results[5]);
       populateFilters();
       render();
+      document.getElementById("feedback-fab").classList.add("visible");
     }
+
+    // ---- Feedback modal wiring ----
+    (function () {
+      var fab = document.getElementById("feedback-fab");
+      var overlay = document.getElementById("feedback-modal-overlay");
+      var textarea = document.getElementById("feedback-message");
+      var status = document.getElementById("feedback-status");
+      var sendBtn = document.getElementById("feedback-send-btn");
+
+      function openModal() {
+        textarea.value = "";
+        status.textContent = "";
+        status.className = "feedback-status";
+        sendBtn.disabled = false;
+        sendBtn.textContent = "Send";
+        overlay.classList.add("open");
+        textarea.focus();
+      }
+      function closeModal() { overlay.classList.remove("open"); }
+
+      fab.addEventListener("click", openModal);
+      document.getElementById("feedback-close-btn").addEventListener("click", closeModal);
+      document.getElementById("feedback-cancel-btn").addEventListener("click", closeModal);
+      overlay.addEventListener("click", function (e) { if (e.target === overlay) closeModal(); });
+
+      sendBtn.addEventListener("click", async function () {
+        var message = textarea.value.trim();
+        if (!message) {
+          status.textContent = "Enter a message first.";
+          status.className = "feedback-status error";
+          return;
+        }
+        sendBtn.disabled = true;
+        sendBtn.textContent = "Sending…";
+        status.textContent = "";
+        status.className = "feedback-status";
+        try {
+          await submitFeedbackRow(message);
+          status.textContent = "Thanks — feedback saved.";
+          status.className = "feedback-status ok";
+          sendBtn.textContent = "Sent";
+          setTimeout(closeModal, 1200);
+        } catch (e) {
+          status.textContent = (e && e.message) ? e.message : String(e);
+          status.className = "feedback-status error";
+          sendBtn.disabled = false;
+          sendBtn.textContent = "Send";
+        }
+      });
+    })();
 
     async function signIn() {
       try {
