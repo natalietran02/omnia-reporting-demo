@@ -562,10 +562,17 @@
       box.style.display = "block";
     }
 
+    // Deliberately does NOT disable the button just because an account
+    // exists — an account can exist (Power BI scope already consented)
+    // while the separate Graph-scope consent (needed for gateAccessAndLoad)
+    // still fails, e.g. on first-ever use for that person. Disabling here
+    // stranded users with no way to retry when that happened during the
+    // automatic silent sign-in on page load (no popup allowed without a
+    // real click) — see signIn()/the auto-sign-in IIFE below, which now
+    // own disabling/re-enabling around the actual work instead.
     function setSignedInUi(account) {
       var btn = document.getElementById("oc-signin-btn");
       btn.textContent = account ? "Signed in as " + account.username : "Sign in to view";
-      btn.disabled = !!account;
     }
 
     async function getToken(interactive) {
@@ -3457,6 +3464,10 @@
     // one already acquired for `powerBiToken`), then either loads the report
     // or shows the access-denied placeholder instead. Shared by the manual
     // sign-in button and the silent auto-sign-in attempt below.
+    // Returns true only once the report has actually loaded — callers use
+    // this to decide whether the sign-in button should stay disabled
+    // (fully done) or be re-enabled so a real click can retry (see signIn()
+    // and the auto-sign-in IIFE below).
     async function gateAccessAndLoad(account, powerBiToken) {
       var access;
       try {
@@ -3464,11 +3475,11 @@
         access = await checkAccess(graphToken, feedbackWorkbookBasePath(), account.username);
       } catch (e) {
         showError("Could not verify dashboard access: " + (e && e.message ? e.message : e));
-        return;
+        return false;
       }
       if (!access.allowed) {
         showAccessDenied(account.username);
-        return;
+        return false;
       }
       CURRENT_SESSION.email = account.username;
       CURRENT_SESSION.role = access.role;
@@ -3476,6 +3487,7 @@
       STATE.isAccessAdmin = access.role === 'admin';
       document.getElementById("oc-access-btn").style.display = access.role === "admin" ? "flex" : "none";
       await loadReport(powerBiToken);
+      return true;
     }
 
     // ---- Manage access modal wiring ----
@@ -3661,13 +3673,21 @@
     })();
 
     async function signIn() {
+      var btn = document.getElementById("oc-signin-btn");
+      btn.disabled = true;
       try {
         var token = await getToken(true);
         var account = msalApp.getAllAccounts()[0];
         setSignedInUi(account);
-        await gateAccessAndLoad(account, token);
+        // Only stays disabled once the whole gate + load has actually
+        // succeeded — re-enabling on false/failure is what lets a second,
+        // genuine click retry (and this time be allowed to pop up a
+        // consent window) instead of leaving the user stuck.
+        var ok = await gateAccessAndLoad(account, token);
+        btn.disabled = !!ok;
       } catch (e) {
         showError("Sign-in or data load failed: " + (e && e.message ? e.message : e));
+        btn.disabled = false;
       }
     }
 
@@ -3678,10 +3698,18 @@
       var accounts = msalApp.getAllAccounts();
       if (accounts.length) {
         setSignedInUi(accounts[0]);
+        var btn = document.getElementById("oc-signin-btn");
         try {
           var token = await getToken(false);
-          await gateAccessAndLoad(accounts[0], token);
-        } catch (e) { /* fall through to manual sign-in button */ }
+          var ok = await gateAccessAndLoad(accounts[0], token);
+          btn.disabled = !!ok;
+        } catch (e) {
+          // Fall through to the manual sign-in button — left enabled (the
+          // default) specifically so a real click can retry whatever
+          // failed here, e.g. a Graph consent popup blocked because this
+          // whole attempt ran automatically, with no user gesture, on
+          // page load.
+        }
       }
     })();
   </script>
