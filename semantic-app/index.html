@@ -350,13 +350,14 @@
     var WORKSPACE_ID = "bbbd2ec3-1085-4a2c-af8a-a0f82fa49f76";
     var DATASET_ID = "8c11a7f7-0992-4591-b51a-50889e641617"; // "Omnia Reporting Demo" semantic model
     var POWERBI_SCOPE = "https://analysis.windows.net/powerbi/api/Dataset.Read.All";
-    // Workspace.ReadWrite.All is bundled in alongside Dataset.Read.All (same
-    // resource, one token request/consent) so the Manage Access panel can
-    // also add someone to the Power BI workspace itself, not just the app's
-    // own AccessUsers list — see addUserToPowerBiWorkspace() below. Whoever
-    // clicks "Add" still needs to already be a Power BI workspace admin
-    // themselves; Power BI enforces that server-side regardless of scope.
-    var POWERBI_SCOPES = [POWERBI_SCOPE, "https://analysis.windows.net/powerbi/api/Workspace.ReadWrite.All"];
+    // Workspace.ReadWrite.All is ONLY requested via getPowerBiAdminToken()
+    // below, used exclusively by the Manage Access Add/Deactivate handlers —
+    // NOT bundled into every regular sign-in. It used to be, which meant
+    // every plain viewer (not just admins) was asked to consent to "Read
+    // and write all workspaces" just to open the dashboard: unnecessary,
+    // confusing, and itself a source of sign-in failures unrelated to
+    // whether that person could actually view the report.
+    var POWERBI_ADMIN_SCOPES = [POWERBI_SCOPE, "https://analysis.windows.net/powerbi/api/Workspace.ReadWrite.All"];
 
     // Feedback writes to a dedicated Excel workbook via Microsoft Graph — a
     // separate concern from the Power BI dataset query above, since it needs
@@ -578,21 +579,38 @@
     async function getToken(interactive) {
       await msalReady;
       var accounts = msalApp.getAllAccounts();
-      var request = { scopes: POWERBI_SCOPES, account: accounts[0] };
+      var request = { scopes: [POWERBI_SCOPE], account: accounts[0] };
       try {
         var result = await msalApp.acquireTokenSilent(request);
         return result.accessToken;
       } catch (e) {
         if (!interactive) throw e;
-        var result = await msalApp.loginPopup({ scopes: POWERBI_SCOPES });
+        var result = await msalApp.loginPopup({ scopes: [POWERBI_SCOPE] });
         setSignedInUi(result.account);
-        var silent = await msalApp.acquireTokenSilent({ scopes: POWERBI_SCOPES, account: result.account });
+        var silent = await msalApp.acquireTokenSilent({ scopes: [POWERBI_SCOPE], account: result.account });
         return silent.accessToken;
       }
     }
 
+    // Separate from getToken() above — only called from the Manage Access
+    // Add/Deactivate handlers, which are the only things that actually need
+    // Workspace.ReadWrite.All. Keeps that broader permission out of the
+    // token every regular viewer gets on ordinary sign-in.
+    async function getPowerBiAdminToken() {
+      await msalReady;
+      var accounts = msalApp.getAllAccounts();
+      var request = { scopes: POWERBI_ADMIN_SCOPES, account: accounts[0] };
+      try {
+        var result = await msalApp.acquireTokenSilent(request);
+        return result.accessToken;
+      } catch (e) {
+        var interactive = await msalApp.acquireTokenPopup(request);
+        return interactive.accessToken;
+      }
+    }
+
     // Adds a person directly to the Power BI workspace as a Viewer — this is
-    // what actually grants data access (see the note on POWERBI_SCOPES
+    // what actually grants data access (see the note on POWERBI_ADMIN_SCOPES
     // above). The caller must already be a workspace admin themselves;
     // Power BI returns an error otherwise, which callers should treat as
     // non-fatal (the AccessUsers entry still saved) rather than blocking
@@ -3569,7 +3587,7 @@
           // admin themselves, so a failure here shouldn't undo the
           // already-saved AccessUsers entry.
           try {
-            var pbiToken = await getToken(true);
+            var pbiToken = await getPowerBiAdminToken();
             await addUserToPowerBiWorkspace(pbiToken, email);
             status.textContent = "Added to the app's access list and the Power BI workspace (Viewer).";
           } catch (pbiErr) {
@@ -3606,7 +3624,7 @@
           // access, not just this app's own gate. Best-effort, same caveat
           // as Add — requires the caller to already be a workspace admin.
           try {
-            var pbiToken = await getToken(true);
+            var pbiToken = await getPowerBiAdminToken();
             await removeUserFromPowerBiWorkspace(pbiToken, email);
             status.textContent = "Removed from the app's access list and the Power BI workspace.";
           } catch (pbiErr) {
