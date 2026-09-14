@@ -2072,6 +2072,525 @@
         '</section>';
     }
 
+    // ---- Revenue page ----
+    var DRIVER_LABELS = { fte: 'FTE', nwd: 'NWD', util: 'Util', rate: 'Rate' };
+    var DRIVER_ORDER = ['util', 'rate', 'nwd', 'fte'];
+    function driverValsForRows(rows) {
+      if (!rows.length) return null;
+      var fteSet = {};
+      rows.forEach(function (r) { if (r.userId) fteSet[r.userId] = true; });
+      var fte = Object.keys(fteSet).length;
+      var totalAvailable = rows.reduce(function (s, r) { return s + (Number(r.available_days) || 0); }, 0);
+      var totalAmount = rows.reduce(function (s, r) { return s + (Number(r.billed_amount) || 0); }, 0);
+      return { fte: fte, nwd: fte ? totalAvailable / fte : null, util: utilPctSafe(rows), rate: avgDailyRateSafe(rows), revenue: totalAmount };
+    }
+    function driverValsForEntityMonths(monthsSet) {
+      return driverValsForRows(rowsForMonths(RAW.utilisation || [], 'month', 'Omnia_Company', monthsSet));
+    }
+    function buildDriverBridge(order, vals, curValue, cmpValue) {
+      if (cmpValue == null || vals.fte.cmp == null || vals.nwd.cmp == null || vals.util.cmp == null || vals.rate.cmp == null) return null;
+      var state = { fte: vals.fte.cmp, nwd: vals.nwd.cmp, util: vals.util.cmp, rate: vals.rate.cmp };
+      var running = cmpValue;
+      var steps = [];
+      order.forEach(function (key, i) {
+        var isLast = i === order.length - 1;
+        var next = { fte: state.fte, nwd: state.nwd, util: state.util, rate: state.rate };
+        next[key] = vals[key].cur;
+        var v = isLast ? curValue : next.fte * next.nwd * (next.util / 100) * next.rate;
+        steps.push({ key: key, label: DRIVER_LABELS[key], delta: v - running });
+        running = v; state = next;
+      });
+      return { start: cmpValue, steps: steps, end: curValue, vals: vals };
+    }
+    function buildSupplyDriverBridge() {
+      var cur = driverValsForEntityMonths(cardMonths());
+      var cmp = driverValsForEntityMonths(cardComparisonMonths());
+      if (!cur || !cmp) {
+        var curMonth = cardMonths()[0], cmpMonth = cardComparisonMonths()[0];
+        return { error: true, missing: !cur ? (curMonth ? monthYearLabel(curMonth) : 'current month') : (cmpMonth ? monthYearLabel(cmpMonth) : 'comparison month') };
+      }
+      var vals = { fte: { cur: cur.fte, cmp: cmp.fte }, nwd: { cur: cur.nwd, cmp: cmp.nwd }, util: { cur: cur.util, cmp: cmp.util }, rate: { cur: cur.rate, cmp: cmp.rate } };
+      var curRevenue = unifiedFactRevenueForMonths(cardMonths()) || 0;
+      var cmpRevenue = unifiedFactRevenueForMonths(cardComparisonMonths()) || 0;
+      return buildDriverBridge(DRIVER_ORDER, vals, curRevenue, cmpRevenue);
+    }
+
+    function renderRevenueDriverTree() {
+      var bridge = buildSupplyDriverBridge();
+      if (!bridge || bridge.error) {
+        return renderNotReadyPanel('Revenue driver tree', 'No utilisation driver data found for ' + (bridge ? bridge.missing : 'this period') + ' yet — both the current and comparison month need available-days/billed-amount fields to build a driver bridge (not yet queried from the semantic model).');
+      }
+      var deltaPct = bridge.start ? ((bridge.end - bridge.start) / bridge.start) * 100 : null;
+      var arrowUp = deltaPct != null && deltaPct >= 0;
+      var revTargetForTree = revenueTargetForMonths(cardMonths());
+      var targetGapDollar = revTargetForTree ? bridge.end - revTargetForTree : null;
+      var targetGapPct = revTargetForTree ? (targetGapDollar / revTargetForTree) * 100 : null;
+      var targetArrowUp = targetGapPct != null && targetGapPct >= 0;
+
+      var factRows = currentPeriodRows(RAW.unifiedFact || [], 'month_date', 'entity');
+      var streamMix = groupSum(factRows, 'project_stream', 'total_revenue');
+      var cmpStreamMix = toValueMap(groupSum(comparisonPeriodRows(RAW.unifiedFact || [], 'month_date', 'entity'), 'project_stream', 'total_revenue'));
+      var mixRowsHtml = streamMix.slice(0, 6).map(function (r) {
+        var cmpVal = cmpStreamMix[r.label];
+        var delta = cmpVal != null ? r.value - cmpVal : null;
+        var color = delta == null ? 'var(--fg3)' : delta > 0 ? 'var(--oc-deep-teal)' : delta < 0 ? 'var(--oc-graphite)' : 'var(--fg3)';
+        var label = delta == null ? '—' : (delta > 0 ? '+' : '') + fmtCurrency(delta);
+        return '<div style="display:flex; justify-content:space-between; align-items:center; padding:13px 16px; border-bottom:1px solid var(--rule);"><span style="font-size:13.5px; font-weight:600;">' + escHtml(r.label) + '</span><span style="font-size:13.5px; font-weight:700; color:' + color + ';">' + label + '</span></div>';
+      }).join('');
+      var driverRowsHtml = bridge.steps.map(function (s) {
+        var isUp = s.delta >= 0;
+        var color = isUp ? 'var(--oc-deep-teal)' : 'var(--oc-graphite)';
+        return '<div style="display:flex; justify-content:space-between; align-items:center; padding:13px 16px; border-bottom:1px solid var(--rule);"><span style="font-size:13.5px; font-weight:600;">Δ ' + s.label + '</span><span style="font-size:13.5px; font-weight:700; color:' + color + ';">' + (isUp ? '+' : '') + fmtCurrency(s.delta) + '</span></div>';
+      }).join('');
+      registerDownload('revenueDriverTree', 'revenue-driver-tree-' + fileSlug() + '.csv', ['Driver', 'Delta'], bridge.steps.map(function (s) { return ['Δ ' + s.label, s.delta.toFixed(2)]; }));
+
+      return '<section class="oc-panel">' + panelHeadWithTools('Revenue driver tree', 'revenueDriverTree') +
+        '<div class="oc-panel-sub">Revenue decomposed into FTE × available days (NWD) × utilisation × daily rate</div>' +
+        '<div style="display:flex; flex-direction:column; align-items:center; gap:0;">' +
+          '<div style="background:var(--bg-inverse); color:var(--fg-on-dark-1); border-radius:var(--radius-lg); padding:14px 28px; text-align:center;">' +
+            '<div style="font-size:11px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--fg-on-dark-3);">Total revenue</div>' +
+            '<div style="font-size:22px; font-weight:800;">' + fmtCurrency(bridge.end) + '</div>' +
+            (targetGapPct != null ? '<div style="margin-top:4px;"><span style="display:inline-block; font-size:11px; font-weight:700; padding:2px 7px; border-radius:var(--radius-sm); background:' + (targetArrowUp ? 'var(--oc-mint-soft)' : 'var(--oc-coral-soft)') + '; color:' + (targetArrowUp ? 'var(--oc-deep-teal-700)' : '#9c2b1a') + ';">' + signedCurrency(targetGapDollar) + ' (' + fmtDelta(targetGapPct) + ') vs target</span></div>' : '') +
+            (deltaPct != null ? '<div style="margin-top:4px;"><span style="display:inline-block; font-size:11px; font-weight:700; padding:2px 7px; border-radius:var(--radius-sm); background:' + (arrowUp ? 'var(--oc-mint-soft)' : 'var(--oc-coral-soft)') + '; color:' + (arrowUp ? 'var(--oc-deep-teal-700)' : '#9c2b1a') + ';">' + (arrowUp ? '▲' : '▼') + ' ' + signedCurrency(bridge.end - bridge.start) + ' (' + fmtDelta(deltaPct) + ')</span></div>' : '') +
+            '<div style="font-size:10.5px; color:var(--fg-on-dark-3); margin-top:4px;">vs ' + monthYearLabel(cardComparisonMonths()[0]) + '</div></div>' +
+          '<div style="width:2px; height:20px; background:var(--rule);"></div>' +
+          '<div style="width:100%; height:2px; background:var(--rule); max-width:1040px;"></div>' +
+          '<div style="width:100%; max-width:1040px; margin-top:20px; display:grid; grid-template-columns:1fr 1fr; gap:32px;">' +
+            '<div><div style="text-align:center; margin-bottom:14px;"><div style="font-size:14px; font-weight:700;">Stream mix</div><div style="font-size:11.5px; color:var(--fg3);">Where the change landed</div></div><div style="border:1px solid var(--rule); border-radius:var(--radius-lg); overflow:hidden;">' + mixRowsHtml + '</div></div>' +
+            '<div><div style="text-align:center; margin-bottom:14px;"><div style="font-size:14px; font-weight:700;">Supply drivers · company-level</div><div style="font-size:11.5px; color:var(--fg3);">FTE × NWD × Utilisation × Rate</div></div><div style="border:1px solid var(--rule); border-radius:var(--radius-lg); overflow:hidden;">' + driverRowsHtml + '</div></div>' +
+          '</div></div></section>';
+    }
+
+    function renderRevenueWaterfall() {
+      var bridge = buildSupplyDriverBridge();
+      if (!bridge || bridge.error) {
+        return renderNotReadyPanel('Revenue waterfall', 'No utilisation driver data found for ' + (bridge ? bridge.missing : 'this period') + ' yet — both the current and comparison month need available-days/billed-amount fields to build a waterfall (not yet queried from the semantic model).');
+      }
+      var running = bridge.start;
+      var points = [{ label: monthYearLabel(cardComparisonMonths()[0]), value: bridge.start, type: 'total' }];
+      bridge.steps.forEach(function (s) {
+        points.push({ label: 'Δ ' + s.label, value: s.delta, bottom: Math.min(running, running + s.delta), top: Math.max(running, running + s.delta), type: 'delta' });
+        running += s.delta;
+      });
+      points.push({ label: monthYearLabel(cardMonths()[0]), value: bridge.end, type: 'total' });
+      var maxVal = Math.max.apply(null, points.map(function (p) { return p.type === 'total' ? p.value : p.top; }).concat([1]));
+      var containerHeight = 200;
+      var barsHtml = points.map(function (p) {
+        var bottomPct, heightPct, color, valueLabel;
+        if (p.type === 'total') {
+          bottomPct = 0; heightPct = maxVal ? (p.value / maxVal) * 100 : 0;
+          color = 'var(--oc-deep-teal)'; valueLabel = fmtCurrency(p.value);
+        } else {
+          bottomPct = maxVal ? (p.bottom / maxVal) * 100 : 0;
+          heightPct = maxVal ? Math.max(((p.top - p.bottom) / maxVal) * 100, 1.2) : 0;
+          color = p.value > 0 ? 'var(--oc-mint-deep)' : p.value < 0 ? 'var(--oc-coral)' : 'var(--fg3)';
+          valueLabel = (p.value > 0 ? '+' : '') + fmtCurrency(p.value);
+        }
+        return '<div style="flex:1 1 0; min-width:0; display:flex; flex-direction:column; align-items:center; gap:6px;"><div style="font-size:12px; font-weight:700; color:' + color + ';">' + valueLabel + '</div>' +
+          '<div style="position:relative; width:100%; height:' + containerHeight + 'px;"><div style="position:absolute; left:10%; right:10%; bottom:' + bottomPct.toFixed(1) + '%; height:' + heightPct.toFixed(1) + '%; background:' + color + '; border-radius:4px;" title="' + p.label + ': ' + valueLabel + '"></div></div>' +
+          '<div style="font-size:11px; font-weight:600; color:var(--fg2); text-align:center;">' + p.label + '</div></div>';
+      }).join('');
+      var legendHtml = '<div class="oc-legend" style="margin-bottom:10px;"><span class="sw"><span class="oc-sw-box" style="background:var(--oc-deep-teal);"></span>Total</span><span class="sw"><span class="oc-sw-box" style="background:var(--oc-mint-deep);"></span>Growth</span><span class="sw"><span class="oc-sw-box" style="background:var(--oc-coral);"></span>Decline</span></div>';
+      registerDownload('revenueWaterfall', 'revenue-waterfall-' + fileSlug() + '.csv', ['Step', 'Value'], points.map(function (p) { return [p.label, p.value.toFixed(2)]; }));
+      var v = bridge.vals;
+      function relPct(cur, cmp) { return cmp ? ((cur - cmp) / cmp) * 100 : null; }
+      var descLines = [
+        (function () { var d = v.util.cur - v.util.cmp; var rel = relPct(v.util.cur, v.util.cmp); return 'Δ Util: (' + Math.abs(d).toFixed(1) + 'pts) ' + (d >= 0 ? 'higher' : 'lower') + ' utilisation (' + v.util.cur.toFixed(1) + '% vs ' + v.util.cmp.toFixed(1) + '%' + (rel != null ? ', ' + fmtDelta(rel) : '') + ')'; })(),
+        (function () { var d = v.nwd.cur - v.nwd.cmp; return 'Δ NWD: ' + Math.abs(d).toFixed(0) + ' ' + (d >= 0 ? 'more' : 'fewer') + ' net working days (' + v.nwd.cur.toFixed(0) + ' vs ' + v.nwd.cmp.toFixed(0) + ')'; })(),
+        (function () { var d = v.rate.cur - v.rate.cmp; return 'Δ Rate: ' + fmtCurrency(Math.abs(d)) + ' ' + (d >= 0 ? 'higher' : 'lower') + ' avg daily rate (' + fmtCurrency(v.rate.cur) + ' vs ' + fmtCurrency(v.rate.cmp) + ')'; })(),
+        (function () { var d = v.fte.cur - v.fte.cmp; return 'Δ FTE: ' + Math.abs(d).toFixed(1) + ' ' + (d >= 0 ? 'more' : 'fewer') + ' FTE (' + v.fte.cur.toFixed(1) + ' vs ' + v.fte.cmp.toFixed(1) + ')'; })(),
+      ];
+      var descBoxHtml = '<div style="background:var(--bg-muted); border-left:3px solid var(--oc-coral); border-radius:var(--radius-md); padding:14px 18px; margin-top:18px; display:flex; flex-direction:column; gap:8px;">' + descLines.map(function (line) { return '<div style="font-size:13px; color:var(--fg1);">' + line + '</div>'; }).join('') + '</div>';
+      return '<section class="oc-panel">' + panelHeadWithTools('Revenue waterfall', 'revenueWaterfall') + legendHtml +
+        '<div style="display:flex; align-items:flex-end; justify-content:center; gap:14px; padding:0 4px;">' + barsHtml + '</div>' + descBoxHtml + '</section>';
+    }
+
+    function renderMonthlyRevenueTrendChart(bars) {
+      var maxVal = Math.max.apply(null, bars.map(function (x) { return Math.max(x.monthRevenue, x.monthTarget); }).concat([1]));
+      var sizes = chartLabelSizes(bars.length);
+      var barsHtml = bars.map(function (x) {
+        var heightPct = maxVal ? (x.monthRevenue / maxVal) * 100 : 0;
+        var targetTopPct = maxVal ? 100 - (x.monthTarget / maxVal) * 100 : 100;
+        var inProgress = isMonthInProgress(x.month);
+        var barBg = inProgress ? 'repeating-linear-gradient(45deg, var(--oc-mint-deep), var(--oc-mint-deep) 4px, var(--oc-mint-soft) 4px, var(--oc-mint-soft) 8px)' : 'var(--oc-deep-teal)';
+        var stackedLabel = '<div class="oc-cum-label" style="font-size:' + sizes.value + 'px; line-height:1.4;">A: ' + fmtCurrency(x.monthRevenue) + (x.monthTarget ? '<br><span style="color:var(--oc-coral);">T: ' + fmtCurrency(x.monthTarget) + '</span>' : '') + '</div>';
+        return '<div class="oc-cum-col">' + stackedLabel + '<div class="oc-cum-bar-wrap"><div class="oc-cum-target-line" style="top:' + targetTopPct.toFixed(1) + '%;" title="Target — ' + fmtCurrency(x.monthTarget) + '"></div><div class="oc-cum-bar" style="height:' + heightPct.toFixed(1) + '%; background:' + barBg + ';" title="' + (inProgress ? 'Known — month still in progress' : '') + '"></div></div></div>';
+      }).join('');
+      var monthRowHtml = bars.map(function (x) {
+        var inProgress = isMonthInProgress(x.month);
+        return '<div class="oc-cum-month-col"><div class="oc-cum-month-label" style="font-size:' + sizes.month + 'px; color:' + (inProgress ? 'var(--oc-mint-deep)' : 'var(--fg2)') + ';">' + MONTH_NAMES[x.month.getMonth()] + '</div><div class="oc-cum-year-label" style="font-size:' + sizes.year + 'px;">' + x.month.getFullYear() + '</div></div>';
+      }).join('');
+      return '<div class="oc-legend"><span class="sw"><span class="oc-sw-box" style="background:var(--oc-deep-teal);"></span>Actual</span><span class="sw"><span class="oc-sw-box" style="background:var(--oc-mint-deep);"></span>Current month (known)</span><span class="sw"><span class="oc-sw-dash" style="border-color:var(--oc-coral);"></span>Monthly target</span></div>' +
+        '<div class="oc-cum-row">' + barsHtml + '</div><div class="oc-cum-month-row">' + monthRowHtml + '</div>';
+    }
+
+    function renderRevenueForecastSection() {
+      var cur = currentMonthWithData();
+      var futureMonths = MONTH_UNIVERSE.filter(function (m) { return m > cur; }).slice(0, 12);
+      function monthActual(m) { return unifiedFactRevenueForMonths([m]) || 0; }
+      function monthTarget(m) { return revenueTargetForMonths([m]) || 0; }
+      var curActual = monthActual(cur);
+      var curTarget = monthTarget(cur);
+      var horizon = futureMonths;
+      var allZero = !curActual && horizon.every(function (m) { return !monthActual(m); });
+      if (allZero) return renderNotReadyPanel('Revenue forecast', 'No revenue rows exist yet for this company view.');
+
+      var allMonths = [cur].concat(horizon);
+      var maxVal = Math.max.apply(null, allMonths.map(function (m) { return Math.max(monthActual(m), monthTarget(m)); }).concat([1]));
+      var curDeltaPct = curTarget ? ((curActual - curTarget) / curTarget) * 100 : null;
+      var knownHorizonTotal = curActual + horizon.reduce(function (s, m) { return s + monthActual(m); }, 0);
+      var cardsHtml = '<div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; margin-bottom:18px; max-width:520px;">' +
+        '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">' + monthYearLabel(cur) + ' (current)</div><div style="font-size:20px; font-weight:800;">' + fmtCurrency(curActual) + '</div>' + (curDeltaPct != null ? '<span class="oc-badge ' + (curDeltaPct > 0 ? 'up' : curDeltaPct < 0 ? 'down' : 'neutral') + '" style="margin-top:4px; display:inline-block;">' + fmtDelta(curDeltaPct) + ' vs target</span>' : '') + '<div class="oc-caption" style="margin-top:4px;">Target ' + fmtCurrency(curTarget) + '</div></div>' +
+        '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Known total (next ' + horizon.length + ' mo.)</div><div style="font-size:20px; font-weight:800;">' + fmtCurrency(knownHorizonTotal) + '</div></div></div>';
+      var barsHtml = allMonths.map(function (m) {
+        var known = monthActual(m), target = monthTarget(m);
+        var heightPct = maxVal ? (known / maxVal) * 100 : 0;
+        var targetTopPct = maxVal ? 100 - (target / maxVal) * 100 : 100;
+        var isFuture = m > cur;
+        return '<div style="flex:1 0 70px; display:flex; flex-direction:column; align-items:center; gap:6px; min-width:0;">' +
+          '<div style="text-align:center;"><div style="font-size:12px; font-weight:700; color:' + (isFuture ? 'var(--oc-deep-teal)' : 'var(--fg1)') + ';">' + fmtCurrency(known) + '</div><div style="font-size:10.5px; font-weight:700; color:var(--oc-coral);">T: ' + fmtCurrency(target) + '</div></div>' +
+          '<div style="position:relative; width:100%; height:170px; display:flex; align-items:flex-end; justify-content:center;">' +
+            '<div style="position:absolute; left:4%; right:4%; height:0; border-top:2px dashed var(--oc-coral); top:' + targetTopPct.toFixed(1) + '%; z-index:1;"></div>' +
+            '<div style="width:100%; max-width:60px; border-radius:5px 5px 0 0; overflow:hidden; height:' + heightPct.toFixed(1) + '%; min-height:3px; background:' + (isFuture ? 'var(--oc-mint-deep)' : 'var(--oc-deep-teal)') + ';' + (isFuture ? ' border:1.5px dashed var(--oc-mint-deep);' : '') + '"></div></div>' +
+          '<div style="font-size:11px; font-weight:600;">' + MONTH_NAMES[m.getMonth()] + '</div><div style="font-size:9.5px; color:var(--fg3);">' + m.getFullYear() + '</div></div>';
+      }).join('');
+      var legendHtml = '<div style="display:flex; gap:18px; flex-wrap:wrap; font-size:11.5px; color:var(--fg3); margin-bottom:14px;">' +
+        '<span style="display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:2px; background:var(--oc-deep-teal); display:inline-block;"></span>Actual to date</span>' +
+        '<span style="display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:2px; background:var(--oc-mint-deep); border:1.5px dashed var(--oc-mint-deep); display:inline-block;"></span>Known · already booked in future months</span>' +
+        '<span style="display:flex; align-items:center; gap:6px;"><span style="width:16px; height:0; border-top:2px dashed var(--oc-coral); display:inline-block;"></span>Target</span></div>';
+      registerDownload('revenueForecast', 'revenue-forecast-' + fileSlug() + '.csv', ['Month', 'Known revenue', 'Target'], allMonths.map(function (m) { return [monthYearLabel(m), monthActual(m).toFixed(2), monthTarget(m).toFixed(2)]; }));
+
+      var factRowsForecast = (RAW.unifiedFact || []).filter(function (r) { return entityMatches(r.entity); });
+      var horizonRowsAll = rowsForMonths(factRowsForecast, 'month_date', null, allMonths);
+      var forecastClientSet = {};
+      horizonRowsAll.forEach(function (r) { if (r.client_name) forecastClientSet[r.client_name] = true; });
+      var clientTableRows = Object.keys(forecastClientSet).map(function (name) {
+        var perMonth = allMonths.map(function (m) { return rowsForMonths(horizonRowsAll, 'month_date', null, [m]).filter(function (r) { return r.client_name === name; }).reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0); });
+        var total = perMonth.reduce(function (s, v) { return s + v; }, 0);
+        return { name: name, perMonth: perMonth, total: total };
+      }).filter(function (r) { return r.total > 0; }).sort(function (a, b) { return b.total - a.total; });
+      var clientTableTotals = allMonths.map(function (m, i) { return clientTableRows.reduce(function (s, r) { return s + r.perMonth[i]; }, 0); });
+      var clientTableGrandTotal = clientTableTotals.reduce(function (s, v) { return s + v; }, 0);
+      registerDownload('revenueForecastByClient', 'revenue-forecast-by-client-' + fileSlug() + '.csv', ['Client'].concat(allMonths.map(monthYearLabel)).concat(['Grand total']), clientTableRows.map(function (r) { return [r.name].concat(r.perMonth.map(function (v) { return v.toFixed(2); })).concat([r.total.toFixed(2)]); }));
+
+      var clientTableMax = Math.max.apply(null, clientTableRows.reduce(function (all, r) { return all.concat(r.perMonth); }, []).concat([0]));
+      function heatCellStyle(v) { if (!v) return ''; var t = clientTableMax ? Math.min(1, v / clientTableMax) : 0; return ' background:rgba(157,210,125,' + (0.08 + t * 0.42).toFixed(2) + ');'; }
+      var isExpanded = STATE.revenueForecastClientsExpanded === 'true';
+      var CLIENT_ROWS_COLLAPSED_COUNT = 5;
+      var clientsExpanded = isExpanded || clientTableRows.length <= CLIENT_ROWS_COLLAPSED_COUNT;
+      var visibleClientRows = clientsExpanded ? clientTableRows : clientTableRows.slice(0, CLIENT_ROWS_COLLAPSED_COUNT);
+      var hiddenClientCount = clientTableRows.length - visibleClientRows.length;
+      var expandRowHtml = hiddenClientCount > 0
+        ? '<tr><td colspan="' + (allMonths.length + 2) + '" style="text-align:center; padding:10px 0;"><div class="oc-pill-toggle" data-toggle="revenueForecastClientsExpanded" style="display:inline-flex;"><button data-value="true">Show ' + hiddenClientCount + ' more client' + (hiddenClientCount === 1 ? '' : 's') + '</button></div></td></tr>'
+        : (isExpanded && clientTableRows.length > CLIENT_ROWS_COLLAPSED_COUNT ? '<tr><td colspan="' + (allMonths.length + 2) + '" style="text-align:center; padding:10px 0;"><div class="oc-pill-toggle" data-toggle="revenueForecastClientsExpanded" style="display:inline-flex;"><button data-value="false">Show less</button></div></td></tr>' : '');
+      var clientTableHtml = clientTableRows.length
+        ? '<div style="overflow-x:auto;"><table class="oc-table" style="white-space:nowrap;"><thead><tr><th style="position:sticky; left:0; background:var(--bg); text-align:left;">Client</th>' +
+            allMonths.map(function (m) { return '<th style="text-align:right;">' + MONTH_NAMES[m.getMonth()] + ' ' + m.getFullYear() + '</th>'; }).join('') + '<th style="text-align:right; font-weight:800;">Grand total</th></tr></thead><tbody>' +
+          visibleClientRows.map(function (r) { return '<tr><td style="position:sticky; left:0; background:var(--bg); font-weight:600;">' + escHtml(r.name) + '</td>' + r.perMonth.map(function (v) { return '<td style="text-align:right;' + heatCellStyle(v) + '">' + (v ? fmtCurrency(v) : '—') + '</td>'; }).join('') + '<td style="text-align:right; font-weight:800;">' + fmtCurrency(r.total) + '</td></tr>'; }).join('') +
+          expandRowHtml +
+          '<tr style="border-top:2px solid var(--rule);"><td style="position:sticky; left:0; background:var(--bg); font-weight:800;">Total</td>' + clientTableTotals.map(function (v) { return '<td style="text-align:right; font-weight:800;">' + fmtCurrency(v) + '</td>'; }).join('') + '<td style="text-align:right; font-weight:800;">' + fmtCurrency(clientTableGrandTotal) + '</td></tr></tbody></table></div>'
+        : '<div class="oc-caption" style="padding:16px 0; text-align:center;">No client-level revenue rows for this horizon.</div>';
+
+      return '<section class="oc-panel">' + panelHeadWithTools('Revenue forecast', 'revenueForecast') +
+        '<div style="margin-top:18px;">' + cardsHtml + '</div>' + legendHtml +
+        '<div style="display:flex; align-items:flex-end; justify-content:center; gap:14px; padding:0 4px; overflow-x:auto;">' + barsHtml + '</div>' +
+        '<div style="margin-top:28px; padding-top:20px; border-top:1px solid var(--rule);">' +
+          '<div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:14px;"><div class="oc-multiple-label">Revenue by client · month</div><button class="oc-icon-btn" data-download="revenueForecastByClient" title="Download data">&#8595;</button></div>' +
+          clientTableHtml + '</div></section>';
+    }
+
+    var REVENUE_LIST_VIEW_OPTIONS = [{ key: 'industries', label: 'Industries' }, { key: 'projects', label: 'Projects' }];
+    function renderRevenuePage() {
+      var factRows = cardPeriodRows(RAW.unifiedFact || [], 'month_date', 'entity');
+      var cmpFactRows = cardComparisonRows(RAW.unifiedFact || [], 'month_date', 'entity');
+      var bars = computeCumulativeBars();
+      var b = periodBounds();
+      var trendBars = b ? b.months.map(function (m) { return { month: m, monthRevenue: unifiedFactRevenueForMonths([m]) || 0, monthTarget: revenueTargetForMonths([m]) || 0 }; }) : [];
+
+      var revenueCumulativeCsvRows = [['Month', 'Revenue', 'Target', 'Cumulative Revenue', 'Cumulative Target']].concat(bars.map(function (x) { return [monthYearLabel(x.month), x.monthRevenue.toFixed(2), x.monthTarget.toFixed(2), x.cumRevenue.toFixed(2), x.cumTarget.toFixed(2)]; }));
+      registerDownload('revenueCumulative', 'revenue-cumulative-' + fileSlug() + '.csv', ['Cumulative revenue'], revenueCumulativeCsvRows);
+      var revenueTrendCsvRows = [['Month', 'Revenue', 'Target']].concat(trendBars.map(function (x) { return [monthYearLabel(x.month), x.monthRevenue.toFixed(2), x.monthTarget.toFixed(2)]; }));
+      registerDownload('revenueTrend', 'revenue-monthly-trend-' + fileSlug() + '.csv', ['Revenue trend'], revenueTrendCsvRows);
+
+      var byStream = groupSum(factRows, 'project_stream', 'total_revenue');
+      var cmpByStream = toValueMap(groupSum(cmpFactRows, 'project_stream', 'total_revenue'));
+      var streamTotal = byStream.reduce(function (s, r) { return s + r.value; }, 0);
+      var PIE_COLORS_R = ['var(--oc-deep-teal)', 'var(--oc-mid-teal)', 'var(--oc-coral)', 'var(--oc-mint-deep)', '#7a8f8f', '#a8b8b8'];
+      var acc = 0;
+      var pieStops = byStream.map(function (r, i) {
+        var startPct = streamTotal ? (acc / streamTotal) * 100 : 0; acc += r.value;
+        var endPct = streamTotal ? (acc / streamTotal) * 100 : 0;
+        return PIE_COLORS_R[i % PIE_COLORS_R.length] + ' ' + startPct.toFixed(1) + '% ' + endPct.toFixed(1) + '%';
+      });
+      var pieGradient = pieStops.length ? 'conic-gradient(' + pieStops.join(', ') + ')' : 'var(--bg-muted)';
+      var streamRowsHtml = byStream.map(function (r, i) {
+        var pct = streamTotal ? (r.value / streamTotal) * 100 : 0;
+        var cmpVal = cmpByStream[r.label];
+        var deltaPct = cmpVal ? ((r.value - cmpVal) / cmpVal) * 100 : null;
+        var deltaHtml = deltaPct != null ? '<span class="oc-badge ' + (deltaPct > 0 ? 'up' : deltaPct < 0 ? 'down' : 'neutral') + '">' + fmtDelta(deltaPct) + '</span>' : '<span class="oc-caption">—</span>';
+        return '<div style="display:grid; grid-template-columns:1.4fr 0.9fr 0.6fr 0.9fr; gap:8px; padding:12px 10px; border-bottom:1px solid var(--rule); align-items:center;">' +
+          '<div style="font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px;"><span style="width:10px; height:10px; border-radius:50%; background:' + PIE_COLORS_R[i % PIE_COLORS_R.length] + '; display:inline-block; flex-shrink:0;"></span>' + escHtml(r.label) + '</div>' +
+          '<div style="font-size:13.5px; font-weight:700;">' + fmtCurrency(r.value) + '</div><div style="font-size:12.5px; color:var(--fg3);">' + pct.toFixed(0) + '%</div><div>' + deltaHtml + '</div></div>';
+      }).join('');
+
+      var overlayField = STATE.revenueListView === 'projects' ? 'project_name' : 'client_industry';
+      var overlayRows = groupSum(factRows, overlayField, 'total_revenue');
+      var cmpOverlayRows = toValueMap(groupSum(cmpFactRows, overlayField, 'total_revenue'));
+      var overlayLabel = STATE.revenueListView === 'projects' ? 'Projects' : 'Industries';
+      var revenueBreakdownCsvRows = [['Project stream', 'Revenue', '% of total']];
+      byStream.forEach(function (r) { revenueBreakdownCsvRows.push([r.label, r.value.toFixed(2), streamTotal ? ((r.value / streamTotal) * 100).toFixed(1) : '']); });
+      revenueBreakdownCsvRows.push([]); revenueBreakdownCsvRows.push(['Top ' + overlayLabel.toLowerCase() + ' by revenue']); revenueBreakdownCsvRows.push([overlayLabel, 'Revenue']);
+      overlayRows.forEach(function (r) { revenueBreakdownCsvRows.push([r.label, r.value.toFixed(2)]); });
+      registerDownload('revenueByStream', 'revenue-breakdown-' + fileSlug() + '.csv', ['Revenue breakdown'], revenueBreakdownCsvRows);
+
+      return renderRevenueDriverTree() + renderRevenueWaterfall() +
+        '<section class="oc-panel">' + panelHeadWithTools('Cumulative revenue vs. target', 'revenueCumulative') + renderCumulativeRevenueChart() + '</section>' +
+        '<section class="oc-panel">' + panelHeadWithTools('Revenue trend', 'revenueTrend') + '<div class="oc-panel-sub">Monthly actual vs. target</div>' + renderMonthlyRevenueTrendChart(trendBars) + '</section>' +
+        renderRevenueForecastSection() +
+        '<section class="oc-panel">' + panelHeadWithTools('Revenue breakdown', 'revenueByStream') +
+          '<div class="oc-panel-sub">By project stream · ' + cardPeriodLabelText() + '</div>' +
+          '<div style="display:grid; grid-template-columns:200px 1fr; gap:28px; align-items:center;">' +
+            '<div style="display:flex; flex-direction:column; align-items:center; gap:14px;"><div style="position:relative; width:160px; height:160px;"><div style="width:160px; height:160px; border-radius:50%; background:' + pieGradient + ';"></div><div style="position:absolute; top:32px; left:32px; width:96px; height:96px; border-radius:50%; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center;"><div style="font-size:11px; color:var(--fg3); font-weight:600;">TOTAL</div><div style="font-size:15px; font-weight:800;">' + fmtCurrency(streamTotal) + '</div></div></div></div>' +
+            '<div><div style="display:grid; grid-template-columns:1.4fr 0.9fr 0.6fr 0.9fr; gap:8px; padding:0 10px 8px; font-size:11px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:var(--fg3); border-bottom:1px solid var(--rule);"><div></div><div>Revenue</div><div>% of total</div><div>' + COMPARE_PREFIX[STATE.compareBasis] + '</div></div>' + streamRowsHtml + '</div></div>' +
+          '<div style="margin-top:22px; padding-top:20px; border-top:1px solid var(--rule);">' +
+            '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; gap:10px; flex-wrap:wrap;"><div class="oc-multiple-label">Top ' + overlayLabel.toLowerCase() + ' by revenue · ' + cardPeriodLabelText() + '</div>' + renderPillToggle(REVENUE_LIST_VIEW_OPTIONS, 'revenueListView') + '</div>' +
+            renderRangedBarList(overlayRows, fmtCurrency, 'revenueOverlayRange', cmpOverlayRows, COMPARE_PREFIX[STATE.compareBasis], true, 50) + '</div></section>';
+    }
+
+    // ---- Shared deal / project-status helpers (used by Clients, Deals, Projects) ----
+    function dealsForEntity() { return (RAW.hubspotDeals || []).filter(function (d) { return entityMatches(d.Omnia_Company); }); }
+    function isClosedStage(s) { return (s || '').toLowerCase().indexOf('closed') !== -1; }
+    function isWonStage(s) { return (s || '').toLowerCase().indexOf('closed won') !== -1; }
+    function isLostStage(s) { return (s || '').toLowerCase().indexOf('closed lost') !== -1; }
+    function daysSince(dateStr) { var d = new Date(dateStr); if (isNaN(d)) return null; return Math.floor((new Date() - d) / (1000 * 60 * 60 * 24)); }
+    function sumAmount(rows) { return rows.reduce(function (s, d) { return s + (Number(d.Amount) || 0); }, 0); }
+    function classifyProjectStatus(ref, periodStart, periodEnd, periodRevenue) {
+      var startDate = ref && ref.Start_Date ? new Date(ref.Start_Date) : null;
+      var endDate = ref && ref.End_Date ? new Date(ref.End_Date) : null;
+      var isNew = startDate && startDate >= periodStart && startDate < periodEnd;
+      var isRolledOff = endDate && endDate >= periodStart && endDate < periodEnd;
+      var isActive = periodRevenue > 0;
+      return isNew ? 'New' : isRolledOff ? 'Rolled off' : isActive ? 'Active' : 'Inactive';
+    }
+    function weightedMarginPctSafe(rows) {
+      var rev = rows.reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0);
+      var margin = rows.reduce(function (s, r) { return s + (Number(r.gross_margin) || 0); }, 0);
+      return rev ? (margin / rev) * 100 : null;
+    }
+
+    // ---- Clients page ----
+    function renderClientChurnPanel() {
+      var b = periodBounds();
+      var cmp = comparisonBounds();
+      if (!b || !cmp) return renderNotReadyPanel('Client churn & risk', 'Needs both a current and comparison period selected to detect churn.');
+      var curRows = currentPeriodRows(RAW.unifiedFact || [], 'month_date', 'entity');
+      var cmpRows = comparisonPeriodRows(RAW.unifiedFact || [], 'month_date', 'entity');
+      function clientRevenueMap(rows) { var m = {}; rows.forEach(function (r) { if (!r.client_name) return; m[r.client_name] = (m[r.client_name] || 0) + (Number(r.total_revenue) || 0); }); return m; }
+      var curMap = clientRevenueMap(curRows);
+      var cmpMap = clientRevenueMap(cmpRows);
+      var churned = Object.keys(cmpMap).filter(function (c) { return cmpMap[c] > 0 && !(curMap[c] > 0); }).map(function (c) { return { label: c, value: cmpMap[c] }; }).sort(function (a, b) { return b.value - a.value; });
+      var openDeals = dealsForEntity().filter(function (d) { return !isClosedStage(d.Deal_Stage); });
+      var openDealClientSet = {};
+      openDeals.forEach(function (d) { if (d.Company) openDealClientSet[d.Company] = true; });
+      var atRisk = Object.keys(curMap).filter(function (c) { return curMap[c] > 0 && cmpMap[c] > 0 && !openDealClientSet[c]; }).map(function (c) { return { label: c, value: curMap[c] }; }).sort(function (a, b) { return b.value - a.value; });
+
+      var churnedPaged = sliceForRange(churned, 'clientChurnedRange');
+      var churnedTable = churned.length ? '<div style="border:1px solid var(--rule); border-radius:var(--radius-lg); overflow:hidden;">' +
+          '<div style="display:grid; grid-template-columns:1.4fr 1fr; gap:8px; padding:10px 14px; font-size:11px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:var(--fg3); background:var(--bg-muted);"><div>Client</div><div>Revenue at churn</div></div>' +
+          churnedPaged.map(function (c) { return '<div style="display:grid; grid-template-columns:1.4fr 1fr; gap:8px; padding:11px 14px; border-bottom:1px solid var(--rule); align-items:center;"><div style="font-size:13px; font-weight:600;">' + escHtml(c.label) + '</div><div style="font-size:12px; color:var(--fg2);">' + fmtCurrency(c.value) + '</div></div>'; }).join('') + '</div>'
+        : '<div class="oc-caption" style="padding:16px 0; text-align:center;">No client churn detected for this comparison.</div>';
+      var atRiskPaged = sliceForRange(atRisk, 'clientAtRiskRange');
+      var atRiskTable = atRisk.length ? '<div style="border:1px solid var(--rule); border-radius:var(--radius-lg); overflow:hidden;">' +
+          atRiskPaged.map(function (c) { return '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding:11px 14px; border-bottom:1px solid var(--rule);"><div style="font-size:13px; font-weight:600;">' + escHtml(c.label) + '</div><div style="text-align:right;"><div style="font-size:13px; font-weight:700;">' + fmtCurrency(c.value) + '</div><div style="font-size:11px; font-weight:600; color:var(--oc-coral);">No open pipeline</div></div></div>'; }).join('') + '</div>'
+        : '<div class="oc-caption" style="padding:16px 0; text-align:center;">No active clients currently missing pipeline coverage.</div>';
+
+      var clientChurnCsvRows = [['Churned clients'], ['Client', 'Revenue at churn']];
+      churned.forEach(function (c) { clientChurnCsvRows.push([c.label, c.value.toFixed(2)]); });
+      clientChurnCsvRows.push([]); clientChurnCsvRows.push(['Active clients with no open pipeline']); clientChurnCsvRows.push(['Client', 'Revenue']);
+      atRisk.forEach(function (c) { clientChurnCsvRows.push([c.label, c.value.toFixed(2)]); });
+      registerDownload('clientChurnRisk', 'client-churn-risk-' + fileSlug() + '.csv', ['Client churn & risk'], clientChurnCsvRows);
+
+      return '<section class="oc-panel">' + panelHeadWithTools('Client churn &amp; risk', 'clientChurnRisk') +
+        '<div class="oc-panel-sub">' + churned.length + ' clients churned ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase() + ' · ' + atRisk.length + ' active clients flagged at risk</div>' +
+        '<div class="oc-note">Churn here means a client billed revenue in the comparison period but zero in the current period. "At risk" means a client is still active but has no open HubSpot deal recorded against their name.</div>' +
+        '<div style="margin-top:18px;"><div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:10px; margin-bottom:10px;"><div class="oc-multiple-label">Churned clients</div>' + rangePillsHtml('clientChurnedRange', churned.length) + '</div>' + churnedTable + '</div>' +
+        '<div style="margin-top:24px; border-top:1px solid var(--rule); padding-top:20px;"><div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:10px; margin-bottom:4px;"><div style="font-size:13px; font-weight:600;">Active clients with no open pipeline</div>' + rangePillsHtml('clientAtRiskRange', atRisk.length) + '</div><div class="oc-caption" style="margin-bottom:12px;">Billing this period and last, but no recorded open deal</div>' + atRiskTable + '</div></section>';
+    }
+
+    function renderClientDeepDivePanel() {
+      var factAll = (RAW.unifiedFact || []).filter(function (r) { return entityMatches(r.entity); });
+      var b = periodBounds();
+      var cur = b ? b.end : currentMonthWithData();
+      var last6 = MONTH_UNIVERSE.filter(function (m) { return m <= cur; }).slice(-6);
+      var last6ClientTotals = groupSum(rowsForMonths(factAll, 'month_date', null, last6), 'client_name', 'total_revenue');
+      var allClientTotals = groupSum(factAll, 'client_name', 'total_revenue').sort(function (a, b) { return b.value - a.value; });
+      if (!allClientTotals.length) return renderNotReadyPanel('Client deep dive', 'No client revenue data available for this company view.');
+
+      if (!STATE.clientDeepDiveScope) STATE.clientDeepDiveScope = 'top5';
+      var scopeList = STATE.clientDeepDiveScope === 'top5' ? last6ClientTotals.slice(0, 5) : allClientTotals;
+      if (!STATE.clientDeepDiveClient || !scopeList.some(function (c) { return c.label === STATE.clientDeepDiveClient; })) {
+        STATE.clientDeepDiveClient = scopeList.length ? scopeList[0].label : allClientTotals[0].label;
+      }
+      var selected = STATE.clientDeepDiveClient;
+      var selectedRowsAll = factAll.filter(function (r) { return r.client_name === selected; });
+      var last6Rows = rowsForMonths(selectedRowsAll, 'month_date', null, last6);
+
+      var periodRevenue = rowsForMonths(selectedRowsAll, 'month_date', null, cardMonths()).reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0);
+      var l6Revenue = last6Rows.reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0);
+      var l6Margin = weightedMarginPctSafe(last6Rows);
+      var activeProjects = {};
+      rowsForMonths(selectedRowsAll, 'month_date', null, [cur]).forEach(function (r) { if (r.project_name && (Number(r.total_revenue) || 0) > 0) activeProjects[r.project_name] = true; });
+      var activeProjectCount = Object.keys(activeProjects).length;
+
+      var cardsHtml = '<div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:20px;">' +
+        '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">' + cardPeriodLabelText() + ' revenue</div><div style="font-size:19px; font-weight:800;">' + fmtCurrency(periodRevenue) + '</div></div>' +
+        '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Rolling L6 revenue</div><div style="font-size:19px; font-weight:800;">' + fmtCurrency(l6Revenue) + '</div></div>' +
+        '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Rolling L6 margin</div><div style="font-size:19px; font-weight:800;">' + (l6Margin != null ? fmtPct(l6Margin) : '—') + '</div></div>' +
+        '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Active projects</div><div style="font-size:19px; font-weight:800;">' + activeProjectCount + '</div></div></div>';
+
+      var monthlyRevenueSeries = last6.map(function (m) { var rows = rowsForMonths(selectedRowsAll, 'month_date', null, [m]); return rows.length ? rows.reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0) : null; });
+      var topProjectNames = groupSum(last6Rows, 'project_name', 'total_revenue').sort(function (a, b) { return b.value - a.value; }).slice(0, 4).map(function (r) { return r.label; });
+      var projectSeries = topProjectNames.map(function (name, i) {
+        return { label: name, color: STACK_COLORS[i % STACK_COLORS.length], values: last6.map(function (m) { return rowsForMonths(selectedRowsAll, 'month_date', null, [m]).filter(function (r) { return r.project_name === name; }).reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0); }) };
+      });
+      var otherProjectValues = last6.map(function (m, i) {
+        var monthTotal = rowsForMonths(selectedRowsAll, 'month_date', null, [m]).reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0);
+        var namedTotal = projectSeries.reduce(function (s, ser) { return s + (ser.values[i] || 0); }, 0);
+        return Math.max(0, monthTotal - namedTotal);
+      });
+      if (otherProjectValues.some(function (v) { return v > 0; })) projectSeries.push({ label: 'Other', color: STACK_COLORS[STACK_COLORS.length - 1], values: otherProjectValues });
+      var rolling6Series = last6.map(function (m) {
+        var idx = MONTH_UNIVERSE.findIndex(function (x) { return monthKey(x) === monthKey(m); });
+        var window = MONTH_UNIVERSE.slice(Math.max(0, idx - 5), idx + 1);
+        var rows = rowsForMonths(selectedRowsAll, 'month_date', null, window);
+        return rows.length ? rows.reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0) : null;
+      });
+      var marginSeries = last6.map(function (m) { var rows = rowsForMonths(selectedRowsAll, 'month_date', null, [m]); return rows.length ? weightedMarginPctSafe(rows) : null; });
+      var marginHasData = marginSeries.some(function (v) { return v != null; });
+      function oneLinerHtml(title) { return '<div><div class="oc-multiple-label" style="margin-bottom:8px;">' + title + '</div><div class="oc-not-ready" style="padding:10px 14px; font-size:12.5px;"><span class="oc-not-ready-tag">Not available yet</span>Needs gross_margin data from the semantic model.</div></div>'; }
+
+      var graphsHtml = '<div style="display:flex; flex-direction:column; gap:24px; margin-top:20px;">' +
+        '<div>' + renderSparklineCard({ label: 'Monthly revenue', color: 'var(--oc-deep-teal)', fmt: fmtCurrencyCompact }, monthlyRevenueSeries, last6, null, null, false, null, 195) + '</div>' +
+        '<div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:24px;">' +
+          renderStackedBarChart('Revenue by project · L6M', last6, projectSeries, fmtCurrency, false, 210) +
+          renderSparklineCard({ label: 'Rolling 6-month revenue', color: 'var(--oc-mint-deep)', fmt: fmtCurrencyCompact }, rolling6Series, last6) +
+        '</div>' +
+        '<div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:24px;">' +
+          (marginHasData ? renderSparklineCard({ label: 'Margin %', color: 'var(--oc-coral)', fmt: fmtPct }, marginSeries, last6) : oneLinerHtml('Margin %')) +
+        '</div></div>';
+
+      var scopeOptions = STATE.clientDeepDiveScope === 'top5' ? last6ClientTotals.slice(0, 5) : allClientTotals;
+      var clientOptionsHtml = scopeOptions.map(function (c) { return '<option value="' + escAttr(c.label) + '"' + (c.label === selected ? ' selected' : '') + '>' + escHtml(c.label) + '</option>'; }).join('');
+      var scopeToggle = renderPillToggle([{ key: 'top5', label: 'Top 5 (L6M)' }, { key: 'all', label: 'Full list' }], 'clientDeepDiveScope');
+
+      var monthlyHeader = ['Month', 'Revenue', 'Margin %', 'Rolling 6mo revenue'].concat(projectSeries.map(function (s) { return 'Revenue — ' + s.label; }));
+      var monthlyRows = last6.map(function (m, i) {
+        return [monthYearLabel(m), monthlyRevenueSeries[i] != null ? monthlyRevenueSeries[i].toFixed(2) : '', marginSeries[i] != null ? marginSeries[i].toFixed(1) : '', rolling6Series[i] != null ? rolling6Series[i].toFixed(2) : ''].concat(projectSeries.map(function (s) { return (s.values[i] || 0).toFixed(2); }));
+      });
+      registerDownload('clientDeepDive', 'client-deep-dive-' + selected.replace(/\s+/g, '-').toLowerCase() + '-' + fileSlug() + '.csv', monthlyHeader, monthlyRows);
+
+      return '<section class="oc-panel">' + panelHeadWithTools('Client deep dive', 'clientDeepDive') +
+        '<div class="oc-panel-sub">What\'s driving revenue for a client, last 6 months</div>' +
+        '<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:18px;">' + scopeToggle +
+          '<select class="oc-filter-select" id="oc-client-deep-dive-select" style="color:var(--fg1); border-color:var(--rule); background:var(--bg); padding:6px 10px; border-radius:var(--radius-md);">' + clientOptionsHtml + '</select></div>' +
+        cardsHtml + graphsHtml + '</section>';
+    }
+
+    function renderClientsPage() {
+      var b = periodBounds();
+      var cardFactRows = cardPeriodRows(RAW.unifiedFact || [], 'month_date', 'entity');
+      var factAll = (RAW.unifiedFact || []).filter(function (r) { return entityMatches(r.entity); });
+
+      var clientFirstMonth = {};
+      factAll.forEach(function (r) {
+        if (!r.client_name || !((Number(r.total_revenue) || 0) > 0)) return;
+        var d = new Date(r.month_date);
+        if (isNaN(d)) return;
+        var m = firstOfMonth(d);
+        if (!clientFirstMonth[r.client_name] || m < clientFirstMonth[r.client_name]) clientFirstMonth[r.client_name] = m;
+      });
+      var clientRefStartDate = {};
+      (RAW.refProjects || []).forEach(function (r) {
+        if (!r.Client || !r.Start_Date) return;
+        var d = new Date(r.Start_Date);
+        if (isNaN(d)) return;
+        if (!clientRefStartDate[r.Client] || d < clientRefStartDate[r.Client]) clientRefStartDate[r.Client] = d;
+      });
+      var clientEarliestDate = {};
+      Object.keys(clientFirstMonth).forEach(function (c) { clientEarliestDate[c] = clientFirstMonth[c]; });
+      Object.keys(clientRefStartDate).forEach(function (c) { if (!clientEarliestDate[c] || clientRefStartDate[c] < clientEarliestDate[c]) clientEarliestDate[c] = clientRefStartDate[c]; });
+      var EXCLUDED_CLIENT_NAMES = ['n/a', 'unknown'];
+      function isExcludedClientName(name) { return EXCLUDED_CLIENT_NAMES.indexOf(String(name || '').toLowerCase()) !== -1; }
+
+      var cardByClientRevenue = groupSum(cardFactRows, 'client_name', 'total_revenue');
+      var cardTotalRevenue = cardByClientRevenue.reduce(function (s, r) { return s + r.value; }, 0);
+      var activeClients = activeClientCount(cardFactRows);
+      var avgRevenueActive = activeClients ? cardTotalRevenue / activeClients : null;
+      var cardKeys = cardMonths().map(monthKey);
+      var newClientRows = cardByClientRevenue.filter(function (r) { if (isExcludedClientName(r.label)) return false; var fm = clientEarliestDate[r.label]; return fm && cardKeys.indexOf(monthKey(fm)) !== -1; });
+      var newClientsCount = newClientRows.length;
+      var newClientsRevenue = newClientRows.reduce(function (s, r) { return s + r.value; }, 0);
+      var avgRevenueNew = newClientsCount ? newClientsRevenue / newClientsCount : null;
+      var top5Total = cardByClientRevenue.slice(0, 5).reduce(function (s, r) { return s + r.value; }, 0);
+      var top5ConcentrationPct = cardTotalRevenue ? (top5Total / cardTotalRevenue) * 100 : null;
+
+      var cardCmpFactRows = cardComparisonRows(RAW.unifiedFact || [], 'month_date', 'entity');
+      var cmpByClientRevenue = groupSum(cardCmpFactRows, 'client_name', 'total_revenue');
+      var cmpTotalRevenue = cmpByClientRevenue.reduce(function (s, r) { return s + r.value; }, 0);
+      var cmpActiveClients = cmpByClientRevenue.length;
+      var cmpAvgRevenueActive = cmpActiveClients ? cmpTotalRevenue / cmpActiveClients : null;
+      var cmpTop5Total = cmpByClientRevenue.slice(0, 5).reduce(function (s, r) { return s + r.value; }, 0);
+      var cmpTop5ConcentrationPct = cmpTotalRevenue ? (cmpTop5Total / cmpTotalRevenue) * 100 : null;
+      var cmpKeys = cardComparisonMonths().map(monthKey);
+      var cmpNewClientRows = cmpByClientRevenue.filter(function (r) { if (isExcludedClientName(r.label)) return false; var fm = clientEarliestDate[r.label]; return fm && cmpKeys.indexOf(monthKey(fm)) !== -1; });
+      var cmpNewClientsCount = cmpNewClientRows.length;
+      var cmpNewClientsRevenue = cmpNewClientRows.reduce(function (s, r) { return s + r.value; }, 0);
+      var cmpAvgRevenueNew = cmpNewClientsCount ? cmpNewClientsRevenue / cmpNewClientsCount : null;
+
+      function pctDeltaBadge(cur, cmp, valueFmt) {
+        if (cur == null || !cmp) return '';
+        valueFmt = valueFmt || signedCount;
+        var diff = cur - cmp, d = (diff / cmp) * 100;
+        return '<span class="oc-badge ' + (d > 0 ? 'up' : d < 0 ? 'down' : 'neutral') + '">' + valueFmt(diff) + ' (' + fmtDelta(d) + ') ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase() + '</span>';
+      }
+      function ptsDeltaBadge(cur, cmp) {
+        if (cur == null || cmp == null) return '';
+        var diff = cur - cmp, relPct = cmp ? (diff / cmp) * 100 : null;
+        return '<span class="oc-badge ' + (diff > 0 ? 'up' : diff < 0 ? 'down' : 'neutral') + '">' + signedPts(diff) + (relPct != null ? ' (' + fmtDelta(relPct) + ')' : '') + ' ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase() + '</span>';
+      }
+      var activeClientsBadge = pctDeltaBadge(activeClients, cmpActiveClients);
+      var avgActiveBadge = pctDeltaBadge(avgRevenueActive, cmpAvgRevenueActive, signedCurrency);
+      var avgNewBadge = pctDeltaBadge(avgRevenueNew, cmpAvgRevenueNew, signedCurrency);
+      var top5Badge = ptsDeltaBadge(top5ConcentrationPct, cmpTop5ConcentrationPct);
+      var newClientsBadge = pctDeltaBadge(newClientsCount, cmpNewClientsCount);
+
+      var byClientRevenue = groupSum(cardFactRows, 'client_name', 'total_revenue');
+      var cmpByClientRevenueMap = toValueMap(groupSum(cardComparisonRows(RAW.unifiedFact || [], 'month_date', 'entity'), 'client_name', 'total_revenue'));
+      registerDownload('clientsTopByRevenue', 'top-clients-' + fileSlug() + '.csv', ['Client', 'Revenue'], byClientRevenue.map(function (r) { return [r.label, r.value.toFixed(2)]; }));
+
+      var newClientsByMonthSeries = b ? b.months.map(function (m) { var k = monthKey(m); return Object.keys(clientEarliestDate).filter(function (c) { return !isExcludedClientName(c) && monthKey(clientEarliestDate[c]) === k; }).length; }) : [];
+      var newClientsByMonthNames = b ? b.months.map(function (m) {
+        var k = monthKey(m);
+        var names = Object.keys(clientEarliestDate).filter(function (c) { return !isExcludedClientName(c) && monthKey(clientEarliestDate[c]) === k; });
+        return monthYearLabel(m) + ': ' + (names.length ? names.join(', ') : 'No new clients');
+      }) : [];
+      registerDownload('newClientsByMonth', 'new-clients-by-month-' + fileSlug() + '.csv', ['Month', 'New clients'], (b ? b.months : []).map(function (m, i) { return [monthYearLabel(m), newClientsByMonthSeries[i]]; }));
+
+      var cardsHtml = '<section class="oc-kpi-grid">' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Active clients</div><div class="oc-kpi-value">' + activeClients + '</div><div class="oc-kpi-delta-row">' + activeClientsBadge + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Avg revenue / active client</div><div class="oc-kpi-value">' + (avgRevenueActive != null ? fmtCurrency(avgRevenueActive) : '—') + '</div><div class="oc-kpi-delta-row">' + avgActiveBadge + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Avg revenue / new client</div><div class="oc-kpi-value">' + (avgRevenueNew != null ? fmtCurrency(avgRevenueNew) : '—') + '</div><div class="oc-kpi-delta-row">' + avgNewBadge + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Top 5 client concentration</div><div class="oc-kpi-value">' + (top5ConcentrationPct != null ? fmtPct(top5ConcentrationPct) : '—') + '</div><div class="oc-kpi-delta-row">' + top5Badge + '<span class="oc-caption">of total revenue</span></div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">New clients</div><div class="oc-kpi-value">' + newClientsCount + '</div><div class="oc-kpi-delta-row">' + newClientsBadge + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div></section>';
+
+      return cardsHtml +
+        '<section class="oc-panel">' + panelHeadWithTools('New clients by month', 'newClientsByMonth') +
+          (b ? renderSparklineCard({ label: '', color: 'var(--oc-deep-teal)', fmt: function (n) { return Math.round(n); } }, newClientsByMonthSeries, b.months, newClientsByMonthNames) : '') + '</section>' +
+        '<section class="oc-panel">' + panelHeadWithTools('Top clients by revenue', 'clientsTopByRevenue') + '<div class="oc-panel-sub">' + cardPeriodLabelText() + '</div>' +
+          renderRangedBarList(byClientRevenue, fmtCurrency, 'clientsDimRange', cmpByClientRevenueMap, COMPARE_PREFIX[STATE.compareBasis], true, 50) + '</section>' +
+        renderClientChurnPanel() + renderClientDeepDivePanel();
+    }
+
     // ---- Page dispatch (Phase 2 will replace each remaining placeholder
     // with a real ported render*Page function, one nav item at a time) ----
     function goToPage(pageKey) {
@@ -2084,6 +2603,10 @@
       CURRENT_DOWNLOADS = {};
       if (STATE.page === 'takeaways') {
         el.innerHTML = renderTakeawaysPage();
+      } else if (STATE.page === 'revenue') {
+        el.innerHTML = renderRevenuePage();
+      } else if (STATE.page === 'clients') {
+        el.innerHTML = renderClientsPage();
       } else {
         var navItem = NAV_ITEMS.filter(function (n) { return n.key === STATE.page; })[0];
         el.innerHTML = renderPlaceholderPage(navItem ? navItem.label : STATE.page);
@@ -2091,6 +2614,13 @@
       wirePillToggles(el);
       wireKpiCards(el);
       wireDownloadButtons(el);
+      var cddSelect = el.querySelector('#oc-client-deep-dive-select');
+      if (cddSelect) {
+        cddSelect.addEventListener('change', function () {
+          STATE.clientDeepDiveClient = cddSelect.value;
+          renderPage();
+        });
+      }
     }
 
     function uniqueEntities(data) {
