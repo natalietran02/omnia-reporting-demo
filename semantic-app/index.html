@@ -249,9 +249,14 @@
     // be able to submit feedback.
     var FEEDBACK_DRIVE_ID = "b!nxzo85sDP0SbRvi-9_y_KVyL_Ahv4PJPifSrs1JXiuHYUPJ6ZuClQJmQ-gq4ilWE";
     var FEEDBACK_ITEM_ID = "01MFUWM2QFPLMV4GOQBNCZP5ZXH6WOPKVV";
-    var FEEDBACK_GRAPH_SCOPE = "https://graph.microsoft.com/Files.ReadWrite";
+    // Mail.Send added alongside Files.ReadWrite so the same token covers both
+    // saving the row and sending the notification email — one token request,
+    // one consent prompt. Requested as an array since MSAL happily bundles
+    // multiple delegated scopes for the same resource (Graph) into one call.
+    var FEEDBACK_GRAPH_SCOPES = ["https://graph.microsoft.com/Files.ReadWrite", "https://graph.microsoft.com/Mail.Send"];
     var FEEDBACK_SHEET_NAME = "Feedback";
     var FEEDBACK_TABLE_NAME = "FeedbackTable";
+    var FEEDBACK_NOTIFY_EMAIL = "natalie@edgered.com.au";
     var feedbackConfigured = !!(FEEDBACK_DRIVE_ID && FEEDBACK_ITEM_ID);
 
     var PIE_COLORS = ["#14201c", "#7c8f89", "#3d7373", "#bfe0cd", "#2f7a63", "#a9c9b8"];
@@ -421,7 +426,7 @@
     async function getFeedbackGraphToken() {
       await msalReady;
       var accounts = msalApp.getAllAccounts();
-      var request = { scopes: [FEEDBACK_GRAPH_SCOPE], account: accounts[0] };
+      var request = { scopes: FEEDBACK_GRAPH_SCOPES, account: accounts[0] };
       try {
         var result = await msalApp.acquireTokenSilent(request);
         return result.accessToken;
@@ -482,6 +487,37 @@
       });
     }
 
+    // Sends as the signed-in submitter's own mailbox (Graph's /me/sendMail),
+    // not a shared system identity — there's no service account to send
+    // "from" here, and this way the notification is genuinely from whoever
+    // submitted it rather than a spoofed sender.
+    async function sendFeedbackNotificationEmail(token, details) {
+      var bodyText = [
+        "New feedback submitted on Omnia Reporting.",
+        "",
+        "From: " + details.submittedBy,
+        "Page: " + details.pageLabel,
+        "OpCo filter: " + details.opco,
+        "",
+        details.message,
+      ].join("\n");
+      var resp = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: {
+            subject: "New feedback — Omnia Reporting",
+            body: { contentType: "Text", content: bodyText },
+            toRecipients: [{ emailAddress: { address: FEEDBACK_NOTIFY_EMAIL } }],
+          },
+        }),
+      });
+      if (!resp.ok) {
+        var text = await resp.text();
+        throw new Error("Could not send notification email (Graph " + resp.status + "): " + text);
+      }
+    }
+
     async function submitFeedbackRow(message) {
       if (!feedbackConfigured) {
         throw new Error("Feedback isn't connected to a workbook yet — set FEEDBACK_DRIVE_ID/FEEDBACK_ITEM_ID in the page source first.");
@@ -505,6 +541,15 @@
       if (!addResp.ok) {
         var text = await addResp.text();
         throw new Error("Could not save feedback (Graph " + addResp.status + "): " + text);
+      }
+
+      // Best-effort: the feedback row is already safely saved above by this
+      // point, so a failure here (e.g. Mail.Send not yet consented on first
+      // use) shouldn't make the whole submission look like it failed.
+      try {
+        await sendFeedbackNotificationEmail(token, { submittedBy: submittedBy, pageLabel: pageLabel, opco: opco, message: message });
+      } catch (e) {
+        console.warn("Feedback saved, but the notification email failed:", e);
       }
     }
 
