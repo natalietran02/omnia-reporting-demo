@@ -3,268 +3,342 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Omnia Reporting — Exec Summary</title>
+<title>Omnia Reporting</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
 <style>
-  :root { color-scheme: light; }
-  html, body { height: 100%; margin: 0; }
-  body {
-    font: 14px -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    background: #f4f4f2; color: #1a1a18;
-    display: flex; flex-direction: column;
-  }
-  header {
-    padding: 14px 24px; background: #14201c; color: #eef4f0;
-    display: flex; align-items: center; justify-content: space-between; gap: 20px;
-    flex: 0 0 auto; flex-wrap: wrap;
-  }
-  header h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: .01em; }
-  header .sub { font-size: 12px; color: #9db3ab; margin-top: 2px; }
-  .header-right { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
-  .header-filters { display: flex; align-items: center; gap: 16px; }
-  .filter-group { display: flex; flex-direction: column; gap: 3px; }
-  .filter-group label { font-size: 10px; color: #9db3ab; text-transform: uppercase; letter-spacing: .04em; }
-  .filter-group select {
-    background: #1c2b25; color: #eef4f0; border: 1px solid #35493f; border-radius: 6px;
-    padding: 6px 10px; font-size: 13px; min-width: 140px;
-  }
-  .header-filters.hidden { display: none; }
-  #signin-btn {
-    background: #2f7a63; color: #fff; border: none; border-radius: 6px;
-    padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
-  }
-  #signin-btn:hover { background: #35906f; }
-  #signin-btn:disabled { cursor: default; opacity: .85; }
-  #manage-access-btn {
-    background: transparent; color: #eef4f0; border: 1px solid #35493f; border-radius: 6px;
-    padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
-  }
-  #manage-access-btn:hover { background: #1c2b25; }
-  .access-row {
-    display: flex; justify-content: space-between; align-items: center; gap: 10px;
-    padding: 9px 0; border-bottom: 1px solid #eceeec; font-size: 13px;
-  }
-  .access-row:last-child { border-bottom: none; }
-  .access-role-chip {
-    font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
-    text-transform: uppercase; background: #eaf3ee; color: #14201c; flex-shrink: 0;
-  }
-  .access-role-chip.admin { background: #14201c; color: #fff; }
+  :root {
+    --oc-deep-teal:     #014348;
+    --oc-deep-teal-700: #013236;
+    --oc-mid-teal:      #3D7373;
+    --oc-mint:          #C1EFA5;
+    --oc-mint-soft:     #D8F8C7;
+    --oc-mint-deep:     #9DD27D;
+    --oc-coral:         #FC836D;
+    --oc-coral-soft:    #FFD9D1;
+    --oc-negative:      #C0392B;
 
-  #stage { flex: 1 1 auto; position: relative; overflow: auto; }
-  #placeholder {
-    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    flex-direction: column; gap: 12px; color: #55605a; text-align: center; padding: 24px;
-  }
-  #placeholder.hidden { display: none; }
-  #error-box {
-    display: none; margin: 16px 24px; padding: 12px 16px; border-radius: 8px;
-    background: #fbe4e1; color: #7a2a20; font-size: 13px; white-space: pre-wrap;
+    --oc-ink:      #000000;
+    --oc-graphite: #434343;
+    --oc-slate:    #595959;
+    --oc-mist:     #EEEEEE;
+    --oc-paper:    #FFFFFF;
+
+    --bg:         var(--oc-paper);
+    --bg-inverse: var(--oc-deep-teal);
+    --bg-muted:   var(--oc-mist);
+
+    --fg1: var(--oc-ink);
+    --fg2: var(--oc-graphite);
+    --fg3: var(--oc-slate);
+    --fg-on-dark-1: var(--oc-paper);
+    --fg-on-dark-2: var(--oc-mint);
+    --fg-on-dark-3: #B7CFCF;
+
+    --rule: rgba(0,0,0,0.12);
+    --rule-on-dark: rgba(255,255,255,0.18);
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 20px;
+    --radius-xl: 28px;
+    --radius-pill: 999px;
+
+    --shadow-1: 0 1px 2px rgba(1,67,72,0.06), 0 1px 1px rgba(1,67,72,0.04);
+    --shadow-2: 0 4px 12px rgba(1,67,72,0.08), 0 2px 4px rgba(1,67,72,0.04);
+    --shadow-3: 0 16px 40px rgba(1,67,72,0.12), 0 4px 12px rgba(1,67,72,0.06);
+
+    --font-sans: "Manrope", system-ui, -apple-system, sans-serif;
+    color-scheme: light;
   }
 
-  #app { display: none; }
-  #app.visible { display: block; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font-family: var(--font-sans); color: var(--fg1); background: var(--bg-muted); display: flex; flex-direction: column; }
+  button, select, input, textarea { font-family: inherit; }
 
-  .tabs { display: flex; gap: 4px; padding: 0 24px; background: #0e1a15; flex: 0 0 auto; overflow-x: auto; }
-  .tab-btn {
-    background: transparent; border: none; color: #9db3ab; padding: 12px 16px; font-size: 13px;
-    font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; flex: 0 0 auto; white-space: nowrap;
+  .app { display: flex; flex-direction: column; min-height: 100vh; }
+
+  header.oc-header { background: var(--bg-inverse); color: var(--fg-on-dark-1); position: sticky; top: 0; z-index: 30; flex: 0 0 auto; }
+  .oc-header-row { display: flex; align-items: center; gap: 20px; padding: 14px 32px; flex-wrap: wrap; }
+  .oc-wordmark { font-size: 19px; font-weight: 800; color: var(--oc-mint); letter-spacing: -0.02em; line-height: 1.1; }
+  .oc-wordmark-sub { font-size: 10.5px; color: var(--fg-on-dark-3); }
+  .oc-company-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+  .oc-pill {
+    padding: 7px 14px; border-radius: var(--radius-pill); border: 1px solid transparent;
+    background: rgba(255,255,255,0.06); color: var(--fg-on-dark-1);
+    font-size: 12px; font-weight: 700; cursor: pointer;
   }
-  .tab-btn:hover { color: #eef4f0; }
-  .tab-btn.active { color: #fff; border-bottom-color: #2f7a63; }
+  .oc-pill.active { background: var(--oc-mint); color: var(--oc-deep-teal-700); border-color: var(--oc-mint); }
 
-  .page { display: none; padding: 20px 24px 4px; max-width: min(2400px, 96vw); width: 100%; box-sizing: border-box; margin: 0 auto; }
-  .page.active { display: block; }
-  #footnote { max-width: min(2400px, 96vw); margin: 0 auto 20px; padding: 0 24px; font-size: 11px; font-style: italic; color: #8a938d; box-sizing: border-box; }
+  .oc-toolbar { display: flex; align-items: center; gap: 14px; margin-left: auto; flex-wrap: wrap; }
+  .oc-toolbar-divider { width: 1px; height: 22px; background: var(--rule-on-dark); }
 
-  .summary-grid { display: grid; grid-template-columns: 230px 1fr; gap: 20px; align-items: start; }
-  .kpi-sidebar { display: flex; flex-direction: column; gap: 14px; }
-  .kpi-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
-  .kpi-row .kpi-card { flex: 1 1 200px; }
-
-  .kpi-card {
-    background: #eaf3ee; border-radius: 10px; padding: 16px 18px;
-    box-shadow: 0 1px 2px rgba(1,67,72,.08); text-align: center;
+  .oc-period-wrap { position: relative; }
+  .oc-period-btn {
+    display: flex; align-items: center; gap: 10px; white-space: nowrap;
+    background: rgba(255,255,255,0.06); color: var(--fg-on-dark-1); border: 1px solid var(--rule-on-dark);
+    border-radius: var(--radius-md); padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer;
   }
-  .kpi-card .label { font-size: 11px; color: #55655d; text-transform: uppercase; letter-spacing: .04em; }
-  .kpi-card .value { font-size: 26px; font-weight: 700; margin-top: 4px; color: #14201c; }
-  .kpi-card .delta { font-size: 12px; margin-top: 4px; font-weight: 600; }
-  .kpi-card .delta.up { color: #2f7a63; }
-  .kpi-card .delta.down { color: #c0392b; }
-  .kpi-card .subtext { font-size: 12px; margin-top: 4px; font-weight: 600; color: #2f7a63; }
-  .kpi-card--primary { background: #14201c; }
-  .kpi-card--primary .label { color: #9db3ab; }
-  .kpi-card--primary .value { color: #fff; }
-  .kpi-card--primary .delta.up { color: #8fe0b8; }
-  .kpi-card--primary .delta.down { color: #ffb4a8; }
-  .kpi-card--combo { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .kpi-card--combo .combo-item { flex: 1 1 auto; text-align: center; }
-  .kpi-card--combo .combo-divider { width: 1px; align-self: stretch; background: #c8d6cd; }
-
-  .panels-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-  .client-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
-  .panel-stack { display: flex; flex-direction: column; gap: 20px; }
-  .panel { border-radius: 10px; overflow: hidden; box-shadow: 0 1px 2px rgba(1,67,72,.08); background: #fff; }
-  .panel-header {
-    background: #14201c; color: #eef4f0; padding: 10px 16px; font-size: 13px; font-weight: 600;
-    display: flex; align-items: center; justify-content: space-between;
+  .oc-eyebrow-inline { font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-on-dark-3); }
+  .oc-period-panel {
+    display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 60;
+    width: 460px; max-height: 480px; overflow-y: auto; background: #fff; color: var(--fg1);
+    border: 1px solid var(--rule); border-radius: var(--radius-lg); box-shadow: var(--shadow-3); padding: 16px 18px;
   }
-  .panel-header .chevron { opacity: .6; font-size: 11px; }
-  .panel-body { padding: 14px 16px 18px; }
-  .panel-note { font-size: 11px; font-style: italic; color: #6b756f; margin-bottom: 8px; }
-  .page-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
-  .page-filter label { font-size: 11px; color: #55655d; text-transform: uppercase; letter-spacing: .04em; }
-  .page-filter select { padding: 6px 10px; border-radius: 6px; border: 1px solid #c8d6cd; font-size: 13px; background: #fff; }
-
-  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; }
-  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #434343; }
-  .legend-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex: 0 0 auto; }
-  .legend-swatch--dot { border-radius: 50%; }
-  .legend-dash { width: 12px; height: 2px; display: inline-block; }
-
-  svg.chart { width: 100%; height: auto; display: block; }
-  .axis-label { font-size: 12px; fill: #8a938d; }
-  .gridline { stroke: #eceeec; stroke-width: 1; }
-  svg.chart rect[data-tip-title], svg.chart path[data-tip-title] { cursor: pointer; }
-  svg.chart rect[data-tip-title]:hover, svg.chart path[data-tip-title]:hover { opacity: .85; }
-
-  .chart-tooltip {
-    display: none; position: fixed; z-index: 1000; pointer-events: none;
-    background: #14201c; color: #eef4f0; border-radius: 8px; padding: 8px 12px;
-    font-size: 12px; max-width: 240px; box-shadow: 0 6px 16px rgba(0,0,0,.28);
+  .oc-period-panel.open { display: block; }
+  .oc-period-panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .oc-period-panel-title { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg3); }
+  .oc-period-done { background: none; border: none; font-size: 12px; font-weight: 700; color: var(--oc-deep-teal); cursor: pointer; }
+  .oc-banner { font-size: 12.5px; color: var(--oc-deep-teal-700); background: var(--oc-mint-soft); border-radius: var(--radius-md); padding: 10px 12px; line-height: 1.45; margin-bottom: 12px; }
+  .oc-presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .oc-preset-btn { padding: 6px 11px; border-radius: var(--radius-pill); border: 1px solid var(--rule); background: var(--bg); color: var(--fg2); font-size: 11.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+  .oc-fy-group { margin-bottom: 14px; }
+  .oc-fy-head { display: flex; align-items: center; gap: 9px; width: 100%; background: none; border: none; padding: 0 0 8px; cursor: pointer; text-align: left; }
+  .oc-fy-label { font-size: 13px; font-weight: 700; color: var(--fg1); }
+  .oc-month-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .oc-month-btn { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 8px; border-radius: var(--radius-sm); border: 1px solid var(--rule); background: var(--bg); cursor: pointer; }
+  .oc-month-checkbox {
+    width: 14px; height: 14px; flex: none; border-radius: 3px; border: 1.5px solid var(--rule); background: var(--bg);
+    display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; color: #fff; line-height: 1;
   }
-  .chart-tooltip .tooltip-title { font-weight: 700; display: flex; align-items: center; gap: 6px; }
-  .chart-tooltip .tooltip-swatch { width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex: 0 0 auto; }
-  .chart-tooltip .tooltip-detail { margin-top: 2px; color: #b9cbc2; }
+  .oc-month-btn.checked { border-color: var(--oc-mint-deep); background: var(--oc-mint-soft); }
+  .oc-month-btn.checked .oc-month-checkbox { background: var(--oc-deep-teal); border-color: var(--oc-deep-teal); }
+  .oc-month-btn-label { font-size: 11.5px; font-weight: 600; color: var(--fg2); white-space: nowrap; display: flex; align-items: center; gap: 4px; line-height: 1; }
+  .oc-month-btn:disabled, .oc-fy-head:disabled { opacity: 0.4; cursor: not-allowed; }
+  .oc-now-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--oc-coral); display: inline-block; }
+  .oc-period-footnote { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--fg3); margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--rule); }
 
-  @media (max-width: 900px) {
-    .summary-grid { grid-template-columns: 1fr; }
-    .panels-grid { grid-template-columns: 1fr; }
-    .client-panels { grid-template-columns: 1fr; }
-  }
+  .oc-compare-wrap { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .oc-compare-label { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-on-dark-3); }
+  .oc-compare-select { background: rgba(255,255,255,0.06); color: var(--fg-on-dark-1); border: 1px solid var(--rule-on-dark); border-radius: var(--radius-md); padding: 8px 10px; font-size: 13px; font-weight: 600; cursor: pointer; width: 180px; flex-shrink: 0; }
+  .oc-compare-select option { color: #111; }
+  .oc-compare-dates { font-size: 12px; color: var(--fg-on-dark-3); white-space: nowrap; max-width: 190px; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: middle; }
 
-  .feedback-fab {
-    position: fixed; bottom: 24px; left: 24px; width: 50px; height: 50px; border-radius: 50%;
-    background: #14201c; color: #eef4f0; border: none; cursor: pointer; font-size: 20px;
-    box-shadow: 0 6px 16px rgba(0,0,0,.28); z-index: 500; display: none; align-items: center; justify-content: center;
+  .oc-signin-btn {
+    background: rgba(255,255,255,0.06); color: var(--fg-on-dark-1); border: 1px solid var(--rule-on-dark);
+    border-radius: var(--radius-md); padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap;
   }
-  .feedback-fab.visible { display: flex; }
-  .feedback-fab:hover { background: #1c2b25; }
-  .feedback-modal-overlay {
-    display: none; position: fixed; inset: 0; background: rgba(20,32,28,.55); z-index: 600;
-    align-items: center; justify-content: center; padding: 20px;
-  }
-  .feedback-modal-overlay.open { display: flex; }
-  .feedback-modal { background: #fff; border-radius: 10px; width: 100%; max-width: 440px; box-shadow: 0 16px 40px rgba(0,0,0,.3); overflow: hidden; }
-  .feedback-modal-head { background: #14201c; color: #eef4f0; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; }
-  .feedback-modal-head h3 { margin: 0; font-size: 14px; font-weight: 700; }
-  .feedback-modal-close { background: transparent; border: none; color: #9db3ab; font-size: 16px; cursor: pointer; }
-  .feedback-modal-body { padding: 16px 18px; }
-  .feedback-modal-body textarea {
-    width: 100%; min-height: 110px; padding: 10px 12px; border: 1px solid #c8d6cd; border-radius: 8px;
-    font: 13px inherit; box-sizing: border-box; resize: vertical;
-  }
-  .feedback-status { font-size: 12px; margin-top: 8px; min-height: 16px; }
-  .feedback-status.error { color: #c0392b; }
-  .feedback-status.ok { color: #2f7a63; }
-  .feedback-modal-foot { padding: 12px 18px; background: #f4f4f2; display: flex; justify-content: flex-end; gap: 8px; }
-  .feedback-btn { padding: 8px 14px; border-radius: 6px; font-size: 12.5px; font-weight: 700; cursor: pointer; border: none; }
-  .feedback-btn-ghost { background: #e4e9e6; color: #14201c; }
-  .feedback-btn-primary { background: #2f7a63; color: #fff; }
-  .feedback-btn-primary:disabled { opacity: .6; cursor: default; }
+  .oc-signin-btn:hover { background: rgba(255,255,255,0.12); }
+  .oc-signin-btn:disabled { cursor: default; opacity: .85; }
+  #oc-access-btn { display: none; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,0.06); color: #fff; border: 1px solid var(--rule-on-dark); cursor: pointer; }
+
+  nav.oc-nav { display: flex; gap: 22px; padding: 0 32px; border-top: 1px solid var(--rule-on-dark); overflow-x: auto; }
+  .oc-nav-btn { display: block; padding: 11px 0; font-size: 13px; font-weight: 600; color: #fff; border: none; border-bottom: 2px solid transparent; white-space: nowrap; background: none; cursor: pointer; }
+  .oc-nav-btn.active { color: var(--oc-mint); border-bottom-color: var(--oc-mint); }
+
+  .oc-pill-toggle { display: inline-flex; gap: 2px; background: var(--bg-muted); border-radius: var(--radius-pill); padding: 3px; }
+  .oc-pill-toggle button { padding: 5px 14px; border-radius: var(--radius-pill); border: none; background: transparent; color: var(--fg2); font-size: 12px; font-weight: 700; cursor: pointer; }
+  .oc-pill-toggle button.active { background: var(--bg); color: var(--oc-deep-teal-700); box-shadow: var(--shadow-1); }
+  .oc-pill-toggle button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  main.oc-main { flex: 1; min-width: 0; padding: 32px 40px 96px; max-width: 2200px; margin: 0 auto; width: 100%; }
+
+  .oc-kpi-grid { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 28px; }
+  .oc-kpi-card { background: var(--bg); border: 1px solid var(--rule); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); padding: 18px 18px 16px; flex: 1 1 160px; min-width: 160px; }
+  .oc-kpi-clickable { cursor: pointer; transition: box-shadow 120ms ease; }
+  .oc-kpi-clickable:hover { box-shadow: var(--shadow-2); }
+  .oc-kpi-label { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg3); margin-bottom: 10px; }
+  .oc-kpi-value { font-size: clamp(16px, 2.1vw, 26px); font-weight: 800; color: var(--fg1); letter-spacing: -0.01em; overflow-wrap: break-word; line-height: 1.15; }
+  .oc-kpi-delta-row { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .oc-badge { font-size: 12px; font-weight: 700; padding: 2px 7px; border-radius: var(--radius-sm); }
+  .oc-badge.up { background: var(--oc-mint-soft); color: var(--oc-deep-teal-700); }
+  .oc-badge.down { background: var(--oc-coral-soft); color: #9c2b1a; }
+  .oc-badge.neutral { background: var(--bg-muted); color: var(--fg3); }
+  .oc-caption { font-size: 11.5px; color: var(--fg3); }
+
+  .oc-panel { background: var(--bg); border: 1px solid var(--rule); border-radius: var(--radius-xl); box-shadow: var(--shadow-1); padding: 24px 28px; margin-bottom: 20px; }
+  .oc-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .oc-panel-title { margin: 0 0 4px; font-size: 20px; font-weight: 600; }
+  .oc-panel-sub { font-size: 13px; color: var(--fg3); margin-bottom: 18px; }
+  .oc-icon-btn { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--radius-pill); border: 1px solid var(--rule); background: var(--bg); color: var(--fg3); cursor: pointer; box-shadow: var(--shadow-1); flex-shrink: 0; }
+
+  .oc-legend { display: flex; gap: 14px; align-items: center; font-size: 11px; color: var(--fg3); margin-bottom: 12px; flex-wrap: wrap; }
+  .oc-legend span.sw { display: inline-flex; align-items: center; gap: 5px; }
+  .oc-sw-box { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .oc-sw-dash { width: 16px; height: 0; display: inline-block; border-top: 2px dashed; }
+
+  .oc-cum-row { display: flex; align-items: flex-end; justify-content: center; gap: 6px; padding: 16px 4px 0; }
+  .oc-cum-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+  .oc-cum-label { font-size: 10px; font-weight: 800; color: var(--oc-deep-teal); white-space: nowrap; text-align: center; }
+  .oc-cum-bar-wrap { position: relative; width: 100%; height: 180px; display: flex; align-items: flex-end; justify-content: center; }
+  .oc-cum-target-line { position: absolute; left: 2%; right: 2%; height: 0; border-top: 2px dashed var(--oc-coral); }
+  .oc-cum-bar { box-sizing: border-box; width: 100%; max-width: 34px; border-radius: 4px 4px 0 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-start; background: rgba(1,67,72,0.16); }
+  .oc-cum-bar-seg { min-height: 3px; background: var(--oc-deep-teal); }
+  .oc-cum-month-row { display: flex; justify-content: center; gap: 6px; padding: 6px 4px 0; }
+  .oc-cum-month-col { flex: 1 1 0; min-width: 0; text-align: center; }
+  .oc-cum-month-label { font-size: 10px; font-weight: 700; color: var(--fg2); white-space: nowrap; }
+  .oc-cum-year-label { font-size: 8.5px; color: var(--fg3); opacity: 0.7; }
+
+  .oc-multiples-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px 48px; margin-top: 24px; }
+  @media (max-width: 800px) { .oc-multiples-grid { grid-template-columns: 1fr; } }
+  .oc-multiple-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .oc-multiple-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg3); }
+  .oc-multiple-legend { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--fg2); }
+  .oc-spark-wrap { position: relative; padding: 0 4px; margin: 14px 0; }
+  .oc-spark-dot { position: absolute; width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--bg); transform: translate(-50%,-50%); box-shadow: var(--shadow-1); }
+
+  .oc-barlist { display: flex; flex-direction: column; gap: 36px; padding-bottom: 20px; }
+  .oc-barlist-row { display: flex; flex-direction: column; gap: 5px; }
+  .oc-barlist-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .oc-barlist-name { font-size: 12.5px; color: var(--fg1); font-weight: 600; overflow-wrap: break-word; min-width: 0; }
+  .oc-barlist-track { background: var(--bg-muted); border-radius: var(--radius-sm); height: 14px; overflow: visible; position: relative; }
+  .oc-barlist-fill { height: 100%; background: var(--oc-deep-teal); border-radius: var(--radius-sm); overflow: hidden; }
+  .oc-barlist-value { font-size: 12.5px; font-weight: 700; color: var(--fg2); white-space: nowrap; flex-shrink: 0; }
+  .oc-barlist-marker { position: absolute; top: -2px; bottom: -2px; width: 0; border-left: 2px dashed var(--oc-coral); filter: drop-shadow(0 0 1px rgba(0,0,0,0.35)); }
+
+  .oc-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 900px) { .oc-two-col { grid-template-columns: 1fr; } }
+
+  .oc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .oc-table th { text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg3); padding: 8px 10px; border-bottom: 1px solid var(--rule); }
+  .oc-table td { padding: 9px 10px; border-bottom: 1px solid var(--rule); color: var(--fg2); }
+  .oc-table tr:last-child td { border-bottom: none; }
+  .oc-note { font-size: 12.5px; color: var(--fg3); background: var(--bg-muted); border-radius: var(--radius-md); padding: 10px 14px; margin-top: 14px; line-height: 1.5; }
+  .oc-not-ready { font-size: 13px; color: var(--fg3); background: var(--bg-muted); border-radius: var(--radius-md); padding: 16px 18px; line-height: 1.55; }
+  .oc-not-ready-tag { display: inline-block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--oc-coral); background: var(--oc-coral-soft); padding: 3px 8px; border-radius: var(--radius-sm); margin-right: 8px; vertical-align: middle; }
+
+  .oc-empty-panel { padding: 60px 20px; text-align: center; color: var(--fg3); font-size: 14px; }
+  .oc-analytics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px 32px; align-items: start; }
+  @media (max-width: 900px) { .oc-analytics-grid { grid-template-columns: 1fr; } }
+  .oc-analytics-grid .oc-barlist { gap: 16px; }
+
+  .oc-loading, .oc-error { font-size: 14px; color: var(--fg3); padding: 60px; text-align: center; }
+  .oc-error { color: var(--oc-coral); }
+
+  .oc-donut { border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .oc-donut-hole { width: 68px; height: 68px; border-radius: 50%; background: var(--bg); }
+  .oc-donut-legend-row { display: flex; align-items: center; gap: 9px; }
+  .oc-donut-swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; flex-shrink: 0; }
+  .oc-aging-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .oc-aging-table th { text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg3); padding-bottom: 10px; border-bottom: 1px solid var(--rule); }
+  .oc-aging-table td { padding: 10px 8px 10px 0; border-bottom: 1px solid var(--rule); }
+  .oc-aging-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: var(--radius-pill); white-space: nowrap; }
+
+  .oc-feedback-fab { position: fixed; bottom: 28px; left: 28px; width: 52px; height: 52px; background: var(--bg-inverse); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: var(--shadow-3); z-index: 400; border: none; transition: transform .2s, box-shadow .2s; }
+  .oc-feedback-fab:hover { transform: scale(1.08); }
+  .oc-feedback-fab .material-symbols-outlined { color: var(--fg-on-dark-1); font-size: 22px; }
+  @media (max-width: 460px) { .oc-feedback-fab { left: 20px; } }
+  .oc-feedback-textarea { display: block; width: 100%; min-height: 120px; border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px; font-family: inherit; color: var(--fg1); resize: vertical; }
+  .oc-feedback-textarea:focus { border-color: var(--oc-mid-teal); outline: none; }
+
+  .oc-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(1,67,72,0.55); z-index: 200; align-items: flex-start; justify-content: center; padding: 60px 20px; overflow-y: auto; }
+  .oc-modal-overlay.open { display: flex; }
+  .oc-modal { background: var(--bg); border-radius: var(--radius-xl); width: 100%; max-width: 640px; box-shadow: var(--shadow-3); overflow: hidden; }
+  .oc-modal-head { background: var(--bg-inverse); color: var(--fg-on-dark-1); padding: 18px 24px; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .oc-modal-head h3 { margin: 0 0 4px; font-size: 16px; font-weight: 700; }
+  .oc-modal-head .oc-modal-meta { font-size: 11px; color: var(--fg-on-dark-3); }
+  .oc-modal-close { background: transparent; border: 1px solid var(--rule-on-dark); color: #fff; width: 28px; height: 28px; border-radius: var(--radius-sm); cursor: pointer; font-size: 14px; flex-shrink: 0; }
+  .oc-modal-body { padding: 20px 24px; max-height: 65vh; overflow-y: auto; }
+  .oc-modal-foot { padding: 14px 24px; background: var(--bg-muted); display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+  .oc-modal-foot .oc-modal-close { width: auto; height: auto; font-size: 12.5px; }
+  .oc-field-label { font-size: 11px; font-weight: 700; color: var(--fg2); text-transform: uppercase; letter-spacing: .06em; display: block; margin-bottom: 6px; }
+  .oc-field-input, .oc-field-textarea, .oc-field-select { width: 100%; border: 1px solid var(--rule); border-radius: var(--radius-md); padding: 9px 12px; font-family: inherit; font-size: 13px; color: var(--fg1); box-sizing: border-box; margin-bottom: 14px; background: var(--bg); }
+  .oc-btn { padding: 8px 16px; border-radius: var(--radius-md); font-size: 12.5px; font-weight: 700; cursor: pointer; border: none; }
+  .oc-btn-ghost { background: var(--bg-muted); color: var(--fg1); }
+  .oc-btn-primary { background: var(--oc-deep-teal); color: #fff; }
+  .oc-btn-danger { background: var(--oc-coral-soft); color: #9c2b1a; }
+  .oc-btn:disabled { opacity: 0.5; cursor: wait; }
+  .oc-ask-status { font-size: 12.5px; color: var(--fg3); min-height: 16px; }
+  .oc-ask-status.oc-ask-error { color: var(--oc-coral); }
+  .oc-ask-status.oc-ask-ok { color: var(--oc-mid-teal); }
+  .oc-editor-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--rule); font-size: 13px; gap: 10px; }
+  .oc-editor-row:last-child { border-bottom: none; }
+  .oc-role-chip { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: var(--radius-pill); text-transform: uppercase; background: var(--bg-muted); color: var(--fg2); flex-shrink: 0; }
+  .oc-role-chip.admin { background: var(--oc-deep-teal); color: #fff; }
+
+  @media print { .oc-feedback-fab { display: none; } }
 </style>
 </head>
 <body>
-  <header>
-    <div class="header-left">
-      <h1 id="page-title">Omnia Reporting</h1>
-      <div class="sub">Semantic model demo — queried directly, not embedded</div>
-    </div>
-    <div class="header-right">
-      <div class="header-filters hidden">
-        <div class="filter-group">
-          <label>Financial Year</label>
-          <select id="fy-select"></select>
+  <div class="app">
+    <header class="oc-header">
+      <div class="oc-header-row">
+        <div>
+          <div class="oc-wordmark">Omnia Reporting</div>
+          <div class="oc-wordmark-sub">Semantic model demo — queried directly, not embedded</div>
         </div>
-        <div class="filter-group">
-          <label>OpCo</label>
-          <select id="opco-select"></select>
+        <div class="oc-company-pills" id="oc-company-pills"></div>
+        <div class="oc-toolbar">
+          <div class="oc-period-wrap" id="oc-period-wrap"></div>
+          <div class="oc-toolbar-divider"></div>
+          <div class="oc-compare-wrap">
+            <span class="oc-compare-label">Compare</span>
+            <select class="oc-compare-select" id="oc-compare-select"></select>
+            <span class="oc-compare-dates" id="oc-compare-dates"></span>
+          </div>
+          <div class="oc-toolbar-divider"></div>
+          <button id="oc-access-btn" title="Manage who can view this dashboard">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="16" y1="11" x2="22" y2="11"/></svg>
+          </button>
+          <button id="oc-signin-btn" class="oc-signin-btn">Sign in to view</button>
         </div>
       </div>
-      <button id="manage-access-btn" style="display:none;" title="Manage who can view this dashboard">Manage access</button>
-      <button id="signin-btn">Sign in to view</button>
-    </div>
-  </header>
-  <div id="error-box"></div>
-  <div id="chart-tooltip" class="chart-tooltip"></div>
+      <nav class="oc-nav" id="oc-nav"></nav>
+      <div class="oc-filter-bar" style="display:flex; align-items:center; gap:10px; padding:9px 32px; border-top:1px solid var(--rule-on-dark); background:rgba(255,255,255,0.04); overflow-x:auto;">
+        <span style="font-size:10.5px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--fg-on-dark-3); white-space:nowrap;">Filter</span>
+        <select class="oc-compare-select" style="width:auto;" id="oc-alliance-select" title="Not backed by real data yet">
+          <option value="all">All alliances</option>
+        </select>
+        <select class="oc-compare-select" style="width:auto;" id="oc-division-select"></select>
+        <select class="oc-compare-select" style="width:auto;" id="oc-projects-select">
+          <option value="all">All projects</option>
+          <option value="ai">AI projects</option>
+        </select>
+      </div>
+    </header>
 
-  <button id="feedback-fab" class="feedback-fab" title="Send feedback">&#128172;</button>
-  <div id="feedback-modal-overlay" class="feedback-modal-overlay">
-    <div class="feedback-modal">
-      <div class="feedback-modal-head">
-        <h3>Send feedback</h3>
-        <button class="feedback-modal-close" id="feedback-close-btn">&#10005;</button>
+    <main class="oc-main">
+      <div id="oc-placeholder" class="oc-loading">Sign in with your EdgeRed account to load the report.</div>
+      <div id="oc-error" class="oc-error" style="display:none;"></div>
+      <div id="oc-loading" class="oc-loading" style="display:none;">Loading reporting data…</div>
+      <div id="oc-content" style="display:none;"></div>
+    </main>
+  </div>
+
+  <button id="oc-feedback-fab" class="oc-feedback-fab" title="Send feedback" style="display:none;">
+    <span class="material-symbols-outlined" aria-hidden="true">chat_bubble</span>
+  </button>
+  <div id="feedback-modal-overlay" class="oc-modal-overlay">
+    <div class="oc-modal">
+      <div class="oc-modal-head">
+        <div><h3>Send feedback</h3></div>
+        <button class="oc-modal-close" id="feedback-close-btn">&#10005;</button>
       </div>
-      <div class="feedback-modal-body">
-        <textarea id="feedback-message" placeholder="What's on your mind?"></textarea>
-        <div id="feedback-status" class="feedback-status"></div>
+      <div class="oc-modal-body">
+        <textarea id="feedback-message" class="oc-feedback-textarea" placeholder="What's on your mind?"></textarea>
+        <div id="feedback-status" class="oc-ask-status"></div>
       </div>
-      <div class="feedback-modal-foot">
-        <button class="feedback-btn feedback-btn-ghost" id="feedback-cancel-btn">Cancel</button>
-        <button class="feedback-btn feedback-btn-primary" id="feedback-send-btn">Send</button>
+      <div class="oc-modal-foot">
+        <button class="oc-btn oc-btn-ghost" id="feedback-cancel-btn">Cancel</button>
+        <button class="oc-btn oc-btn-primary" id="feedback-send-btn">Send</button>
       </div>
     </div>
   </div>
 
-  <div id="access-modal-overlay" class="feedback-modal-overlay">
-    <div class="feedback-modal" style="max-width:480px;">
-      <div class="feedback-modal-head">
-        <h3>Manage access</h3>
-        <button class="feedback-modal-close" id="access-close-btn">&#10005;</button>
+  <div id="access-modal-overlay" class="oc-modal-overlay">
+    <div class="oc-modal">
+      <div class="oc-modal-head">
+        <div><h3>Manage access</h3><div class="oc-modal-meta">Controls who can sign in and view this dashboard at all</div></div>
+        <button class="oc-modal-close" id="access-close-btn">&#10005;</button>
       </div>
-      <div class="feedback-modal-body">
-        <div style="font-size:11.5px; color:#6b756f; margin-bottom:10px;">Controls who can sign in and view this dashboard at all.</div>
+      <div class="oc-modal-body">
         <div id="access-list"></div>
-        <div style="margin-top:16px; padding-top:14px; border-top:1px solid #eceeec;">
-          <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#55655d; display:block; margin-bottom:6px;">Add / update person — email</label>
-          <input type="email" id="access-add-email" placeholder="name@edgered.com.au"
-            style="width:100%; padding:8px 10px; border:1px solid #c8d6cd; border-radius:6px; margin-bottom:10px; box-sizing:border-box; font-size:13px;">
-          <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#55655d; display:block; margin-bottom:6px;">Role</label>
-          <select id="access-add-role" style="width:100%; padding:8px 10px; border:1px solid #c8d6cd; border-radius:6px; font-size:13px;">
+        <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--rule);">
+          <label class="oc-field-label">Add / update person — email</label>
+          <input type="email" id="access-add-email" class="oc-field-input" placeholder="name@edgered.com.au">
+          <label class="oc-field-label">Role</label>
+          <select id="access-add-role" class="oc-field-select">
             <option value="user">user — can view</option>
             <option value="admin">admin — can also manage access</option>
           </select>
-          <div id="access-status" class="feedback-status"></div>
+          <div id="access-status" class="oc-ask-status"></div>
         </div>
       </div>
-      <div class="feedback-modal-foot">
-        <button class="feedback-btn feedback-btn-ghost" id="access-close-btn-2">Close</button>
-        <button class="feedback-btn feedback-btn-primary" id="access-save-btn">Add / Update</button>
+      <div class="oc-modal-foot">
+        <button class="oc-btn oc-btn-ghost" id="access-close-btn-2">Close</button>
+        <button class="oc-btn oc-btn-primary" id="access-save-btn">Add / Update</button>
       </div>
-    </div>
-  </div>
-
-  <div id="stage">
-    <div id="placeholder">
-      <div>Sign in with your EdgeRed account to load the report.</div>
-    </div>
-    <div id="app">
-      <div class="tabs">
-        <button class="tab-btn active" data-page="summary">Summary</button>
-        <button class="tab-btn" data-page="clients">Client Overview</button>
-        <button class="tab-btn" data-page="revenue">Revenue Overview</button>
-        <button class="tab-btn" data-page="deals">Deals Overview</button>
-        <button class="tab-btn" data-page="accounts">Top Accounts</button>
-        <button class="tab-btn" data-page="utilisation">Utilisation Overview</button>
-        <button class="tab-btn" data-page="certifications">Certifications</button>
-      </div>
-      <div id="page-summary" class="page active"></div>
-      <div id="page-clients" class="page"></div>
-      <div id="page-revenue" class="page"></div>
-      <div id="page-deals" class="page"></div>
-      <div id="page-accounts" class="page"></div>
-      <div id="page-utilisation" class="page"></div>
-      <div id="page-certifications" class="page"></div>
-      <div id="footnote"></div>
     </div>
   </div>
 
@@ -321,8 +395,6 @@
     var BOOTSTRAP_ADMIN_EMAILS = ["natalie@edgered.com.au", "wil@edgered.com.au", "nathan@edgered.com.au"];
     var ACCESS_SHEET_NAME = "AccessUsers";
     var ACCESS_TABLE_NAME = "AccessUsersTable";
-
-    var PIE_COLORS = ["#14201c", "#7c8f89", "#3d7373", "#bfe0cd", "#2f7a63", "#a9c9b8"];
 
     // ---- DAX queries ----
     // Revenue vs. target: one row per entity/month, both actual and target in the same table.
@@ -397,18 +469,6 @@
       "    \"ExpirationDate\", data_certifications[ExpirationDate]\n" +
       ")";
 
-    // Targets are keyed by Grade + FY, not by month, so the Utilisation Overview
-    // page can only show a flat (grade-averaged) target line, not a monthly one.
-    var Q_TARGET_DAILY_RATE =
-      "EVALUATE\n" +
-      "SELECTCOLUMNS(\n" +
-      "    data_target_daily_rate,\n" +
-      "    \"FY\", data_target_daily_rate[FY],\n" +
-      "    \"Grade\", data_target_daily_rate[Grade],\n" +
-      "    \"UtilisationTarget\", data_target_daily_rate[Utilisation_Target],\n" +
-      "    \"DailyRateTarget\", data_target_daily_rate[Daily_Rate_Target]\n" +
-      ")";
-
     var msalApp = new msal.PublicClientApplication({
       auth: {
         clientId: CLIENT_ID,
@@ -420,13 +480,13 @@
     var msalReady = msalApp.initialize();
 
     function showError(msg) {
-      var box = document.getElementById("error-box");
+      var box = document.getElementById("oc-error");
       box.textContent = msg;
       box.style.display = "block";
     }
 
     function setSignedInUi(account) {
-      var btn = document.getElementById("signin-btn");
+      var btn = document.getElementById("oc-signin-btn");
       btn.textContent = account ? "Signed in as " + account.username : "Sign in to view";
       btn.disabled = !!account;
     }
@@ -623,9 +683,9 @@
 
       var accounts = msalApp.getAllAccounts();
       var submittedBy = accounts[0] ? accounts[0].username : "unknown";
-      var activeTab = document.querySelector(".tab-btn.active");
-      var pageLabel = activeTab ? activeTab.textContent : "";
-      var opco = document.getElementById("opco-select") ? currentOpco() : "All";
+      var activeNavItem = NAV_ITEMS.filter(function (n) { return n.key === STATE.page; })[0];
+      var pageLabel = activeNavItem ? activeNavItem.label : STATE.page;
+      var opco = STATE.entity || "All";
 
       var row = [new Date().toISOString(), submittedBy, pageLabel, opco, message];
       var addResp = await fetch(basePath + "/workbook/tables('" + FEEDBACK_TABLE_NAME + "')/rows/add", {
@@ -769,1089 +829,947 @@
       var d = new Date(v);
       return isNaN(d.getTime()) ? null : d;
     }
-    function monthLabel(d) {
-      return d.toLocaleDateString("en-AU", { month: "short", year: "2-digit" });
-    }
-    function fmtMoneyAbbrev(v) {
-      v = v || 0;
-      var sign = v < 0 ? "-" : "";
-      var abs = Math.abs(v);
-      if (abs >= 1e6) return sign + "$" + (abs / 1e6).toFixed(1) + "M";
-      if (abs >= 1e3) return sign + "$" + (abs / 1e3).toFixed(0) + "K";
-      return sign + "$" + Math.round(abs);
-    }
-    function fmtInt(v) { return Math.round(v || 0).toLocaleString("en-AU"); }
     function escapeHtml(s) {
       return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
         return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
       });
     }
+    function escHtml(s) { return escapeHtml(s); }
+    function escAttr(s) { return escHtml(s).replace(/"/g, '&quot;'); }
 
-    function deltaHtml(pct) {
-      if (pct == null || !isFinite(pct)) return "";
-      var cls = pct >= 0 ? "up" : "down";
-      var arrow = pct >= 0 ? "▲" : "▼";
-      return '<div class="delta ' + cls + '">' + Math.abs(pct).toFixed(1) + "%" + arrow + " vs LY</div>";
+    function fmtCurrency(n) { if (n == null || isNaN(n)) return '—'; return '$' + Math.round(n).toLocaleString(); }
+    function fmtCurrencyCompact(n) {
+      if (n == null || isNaN(n)) return '—';
+      var sign = n < 0 ? '-' : '';
+      var abs = Math.abs(n);
+      if (abs >= 1000000) return sign + '$' + (abs / 1000000).toFixed(1) + 'm';
+      if (abs >= 1000) return sign + '$' + (abs / 1000).toFixed(1) + 'k';
+      return sign + '$' + Math.round(abs).toLocaleString();
     }
-
-    function kpiCard(label, valueHtml, opts) {
-      opts = opts || {};
-      var sub = opts.subText ? '<div class="subtext">' + escapeHtml(opts.subText) + "</div>" : "";
-      return '<div class="kpi-card' + (opts.primary ? " kpi-card--primary" : "") + '">' +
-        '<div class="label">' + label + "</div>" +
-        '<div class="value">' + valueHtml + "</div>" +
-        deltaHtml(opts.deltaPct) + sub +
-        "</div>";
-    }
-
-    // ---- Fiscal year helpers (AU-style FY: Jul-Jun, labelled by the year it ends in) ----
-    function fyStartYear(d) { return d.getMonth() >= 6 ? d.getFullYear() : d.getFullYear() - 1; }
-    function fyLabel(startYear) { return "FY" + String((startYear + 1) % 100).padStart(2, "0"); }
-    function fyMonths(startYear) {
-      var months = [];
-      for (var i = 0; i < 12; i++) months.push(new Date(startYear, 6 + i, 1));
-      return months;
-    }
-    function monthKey(d) { return d.getFullYear() * 12 + d.getMonth(); }
-    function monthsRangeFromData(rows, opco) {
-      var mn = null, mx = null;
-      rows.forEach(function (r) {
-        if (!matches(r.entity, opco)) return;
-        if (!mn || r.month < mn) mn = r.month;
-        if (!mx || r.month > mx) mx = r.month;
-      });
-      if (!mn) return [];
-      var arr = [], cur = new Date(mn.getFullYear(), mn.getMonth(), 1);
-      while (cur <= mx) { arr.push(new Date(cur)); cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1); }
-      return arr;
-    }
-    // Same idea as monthsRangeFromData but for a plain array of dates (no entity/opco
-    // dimension to filter by) — used by the Certifications page.
-    function monthsRangeSimple(dates) {
-      if (!dates.length) return [];
-      var mn = new Date(Math.min.apply(null, dates)), mx = new Date(Math.max.apply(null, dates));
-      var arr = [], cur = new Date(mn.getFullYear(), mn.getMonth(), 1);
-      var end = new Date(mx.getFullYear(), mx.getMonth(), 1);
-      while (cur <= end) { arr.push(new Date(cur)); cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1); }
-      return arr;
-    }
-    function fyQuarterInfo(d) {
-      var fyMonthIdx = (d.getMonth() - 6 + 12) % 12;
-      return { startYear: fyStartYear(d), q: Math.floor(fyMonthIdx / 3) + 1 };
-    }
-    function fyQuarterRange(startYear, q) {
-      var offset = (q - 1) * 3;
-      var start = new Date(startYear, 6 + offset, 1);
-      var lastMonthFirst = new Date(startYear, 6 + offset + 2, 1);
-      var end = new Date(lastMonthFirst.getFullYear(), lastMonthFirst.getMonth() + 1, 0);
-      return { start: start, end: end };
-    }
-    function prevQuarter(startYear, q) {
-      return q === 1 ? { startYear: startYear - 1, q: 4 } : { startYear: startYear, q: q - 1 };
+    function fmtPct(n) { if (n == null || isNaN(n)) return '—'; return n.toFixed(1) + '%'; }
+    function fmtDelta(n) { if (n == null || isNaN(n)) return null; return (n > 0 ? '+' : '') + n.toFixed(1) + '%'; }
+    function signedCurrency(n) { return (n > 0 ? '+' : '') + fmtCurrencyCompact(n); }
+    function signedPts(n) { return (n > 0 ? '+' : '') + n.toFixed(1) + 'pts'; }
+    function signedCount(n, decimals) { return (n > 0 ? '+' : '') + n.toFixed(decimals || 0); }
+    var AU_STATE_ABBREVIATIONS = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'NT', 'ACT'];
+    function titleCase(s) {
+      if (!s) return s;
+      var trimmed = String(s).trim();
+      if (AU_STATE_ABBREVIATIONS.indexOf(trimmed.toUpperCase()) !== -1) return trimmed.toUpperCase();
+      return trimmed.toLowerCase().replace(/\b\w/g, function (c) { return c.toUpperCase(); });
     }
 
-    // Any Deal_Stage value containing "won"/"lost" is classified as such; everything
-    // else (Discovery, Proposal, etc.) is treated as still-open pipeline. This avoids
-    // hardcoding the CRM's exact stage names, which vary and weren't confirmed.
-    function stageBucket(stage) {
-      var s = String(stage || "").toLowerCase();
-      if (s.indexOf("won") !== -1) return "won";
-      if (s.indexOf("lost") !== -1) return "lost";
-      return "open";
-    }
-
-    function matches(value, selected) {
-      return selected === "All" || String(value) === selected;
-    }
-    function inScope(row, monthsSet, opco) {
-      return matches(row.entity, opco) && (monthsSet === null || monthsSet[monthKey(row.month)]);
-    }
-    function aggregateBy(rows, keyFn, valFn) {
-      var map = {};
-      rows.forEach(function (r) {
-        var k = keyFn(r);
-        if (k == null) return;
-        map[k] = (map[k] || 0) + valFn(r);
-      });
-      return map;
-    }
-    function topN(map, n) {
-      return Object.keys(map).map(function (k) { return { label: k, value: map[k] }; })
-        .sort(function (a, b) { return b.value - a.value; }).slice(0, n);
-    }
-
-    // ---- Chart hover tooltip ----
-    // Charts are re-rendered as raw HTML strings, so rather than wiring listeners
-    // per shape we tag each hoverable <rect>/<path> with data-tip-* attributes and
-    // use a single delegated mousemove listener on the document.
-    function showTooltip(x, y, html) {
-      var tip = document.getElementById("chart-tooltip");
-      tip.innerHTML = html;
-      tip.style.display = "block";
-      var rect = tip.getBoundingClientRect();
-      var left = x + 14, top = y + 14;
-      if (left + rect.width > window.innerWidth) left = x - rect.width - 14;
-      if (top + rect.height > window.innerHeight) top = y - rect.height - 14;
-      tip.style.left = Math.max(4, left) + "px";
-      tip.style.top = Math.max(4, top) + "px";
-    }
-    function hideTooltip() { document.getElementById("chart-tooltip").style.display = "none"; }
-    function tipAttrs(title, lines, color) {
-      var attrs = 'data-tip-title="' + escapeHtml(title) + '" data-tip-detail="' + escapeHtml(lines.join("||")) + '"';
-      if (color) attrs += ' data-tip-color="' + escapeHtml(color) + '"';
-      return attrs;
-    }
-    document.addEventListener("mousemove", function (e) {
-      var el = e.target.closest && e.target.closest("[data-tip-title]");
-      if (!el) { hideTooltip(); return; }
-      var title = el.getAttribute("data-tip-title") || "";
-      var detailRaw = el.getAttribute("data-tip-detail") || "";
-      var color = el.getAttribute("data-tip-color");
-      var lines = detailRaw ? detailRaw.split("||") : [];
-      var swatch = color ? '<span class="tooltip-swatch" style="background:' + color + '"></span>' : "";
-      var html = '<div class="tooltip-title">' + swatch + escapeHtml(title) + "</div>" +
-        lines.map(function (l) { return '<div class="tooltip-detail">' + escapeHtml(l) + "</div>"; }).join("");
-      showTooltip(e.clientX, e.clientY, html);
-    });
-
-    // ---- SVG chart helpers ----
-    // The viewBox width is chosen to roughly match a real rendered panel width, so
-    // the aspect ratio (width:100%, height:auto) doesn't force the browser to
-    // scale text/bars up or down noticeably between chart types — a mismatch here
-    // previously caused inconsistent text sizes and (once max-height clamped the
-    // resulting oversized height) large empty gutters on wide panels.
-    function chartFrame(n) {
-      var W = 760, H = 230, padL = 54, padR = 16, padT = 14, padB = 28;
-      return { W: W, H: H, padL: padL, padR: padR, padT: padT, padB: padB, plotW: W - padL - padR, plotH: H - padT - padB, n: n };
-    }
-
-    function gridAndAxes(f, yMin, yMax, yFmt, xLabels) {
-      function yScale(v) { return f.padT + f.plotH - ((v - yMin) / (yMax - yMin || 1)) * f.plotH; }
-      var gridCount = 4, gridlines = "", yLabels = "";
-      for (var g = 0; g <= gridCount; g++) {
-        var val = yMin + (g / gridCount) * (yMax - yMin);
-        var y = yScale(val);
-        gridlines += '<line class="gridline" x1="' + f.padL + '" x2="' + (f.W - f.padR) + '" y1="' + y + '" y2="' + y + '"/>';
-        yLabels += '<text class="axis-label" x="' + (f.padL - 6) + '" y="' + (y + 3) + '" text-anchor="end">' + yFmt(val) + '</text>';
-      }
-      // Pick evenly-spaced ticks, then only add/replace with the final index if it
-      // won't collide with the last chosen tick (fixes overlapping end labels when
-      // n-1 isn't a multiple of the step, e.g. 12 months at every-2 spacing).
-      var maxTicks = 6;
-      var step = Math.max(1, Math.ceil(f.n / maxTicks));
-      var shown = [];
-      for (var i = 0; i < f.n; i += step) shown.push(i);
-      if (shown[shown.length - 1] !== f.n - 1) {
-        if (f.n - 1 - shown[shown.length - 1] >= step) shown.push(f.n - 1);
-        else shown[shown.length - 1] = f.n - 1;
-      }
-      var xLabelsSvg = "";
-      shown.forEach(function (i) {
-        var x = f.padL + (f.n <= 1 ? 0 : (i / (f.n - 1)) * f.plotW);
-        xLabelsSvg += '<text class="axis-label" x="' + x + '" y="' + (f.H - 6) + '" text-anchor="middle">' + escapeHtml(xLabels[i]) + '</text>';
-      });
-      return { yScale: yScale, gridlines: gridlines, yLabels: yLabels, xLabelsSvg: xLabelsSvg };
-    }
-
-    // values/targets: arrays aligned to xLabels. targets entries may be null.
-    function renderBarWithTarget(values, targets, xLabels, opts) {
-      opts = opts || {};
-      var f = chartFrame(xLabels.length);
-      var allVals = values.concat(targets).filter(function (v) { return v != null; });
-      var yMax = (opts.yMax != null ? opts.yMax : Math.max.apply(null, allVals.length ? allVals : [1])) * 1.15;
-      var axes = gridAndAxes(f, 0, yMax, opts.yFmt || function (v) { return Math.round(v); }, xLabels);
-      var bw = f.plotW / f.n, barW = bw * 0.55;
-      var bars = "";
-      values.forEach(function (v, i) {
-        if (v == null) return;
-        var x = f.padL + i * bw + (bw - barW) / 2;
-        var y = axes.yScale(v);
-        var lines = [(opts.seriesLabel || "Revenue") + ": " + (opts.yFmt ? opts.yFmt(v) : v)];
-        if (targets[i] != null) lines.push((opts.targetLabel || "Revenue Target") + ": " + (opts.yFmt ? opts.yFmt(targets[i]) : targets[i]));
-        bars += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) +
-          '" height="' + (f.padT + f.plotH - y).toFixed(1) + '" fill="' + (opts.barColor || "#bfe0cd") + '" rx="1" ' +
-          tipAttrs(xLabels[i], lines, opts.barColor) + '/>';
-      });
-      var markers = "";
-      targets.forEach(function (t, i) {
-        if (t == null) return;
-        var x = f.padL + i * bw + (bw - barW) / 2;
-        var y = axes.yScale(t);
-        markers += '<line x1="' + x.toFixed(1) + '" x2="' + (x + barW).toFixed(1) + '" y1="' + y.toFixed(1) + '" y2="' + y.toFixed(1) +
-          '" stroke="' + (opts.targetColor || "#14201c") + '" stroke-width="3"/>';
-      });
-      return '<svg class="chart" viewBox="0 0 ' + f.W + ' ' + f.H + '">' +
-        axes.gridlines + axes.yLabels + axes.xLabelsSvg + bars + markers + "</svg>";
-    }
-
-    function renderBarChart(values, xLabels, opts) {
-      opts = opts || {};
-      var f = chartFrame(xLabels.length);
-      var allVals = values.filter(function (v) { return v != null; });
-      var yMax = (opts.yMax != null ? opts.yMax : Math.max.apply(null, allVals.length ? allVals : [1])) * 1.15;
-      var axes = gridAndAxes(f, 0, yMax, opts.yFmt || function (v) { return Math.round(v); }, xLabels);
-      var bw = f.plotW / f.n, barW = bw * 0.55;
-      var bars = "";
-      values.forEach(function (v, i) {
-        if (v == null) return;
-        var x = f.padL + i * bw + (bw - barW) / 2;
-        var y = axes.yScale(v);
-        bars += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) +
-          '" height="' + (f.padT + f.plotH - y).toFixed(1) + '" fill="' + (opts.barColor || "#7f8c86") + '" rx="1" ' +
-          tipAttrs(xLabels[i], [opts.yFmt ? opts.yFmt(v) : v], opts.barColor) + '/>';
-      });
-      return '<svg class="chart" viewBox="0 0 ' + f.W + ' ' + f.H + '">' +
-        axes.gridlines + axes.yLabels + axes.xLabelsSvg + bars + "</svg>";
-    }
-
-    // opts.valueFmt: optional formatter to print the value at the end of each bar.
-    // opts.colors: optional array to color each row categorically (cycled by index),
-    // overriding the single opts.barColor — used where each category needs its own
-    // color (e.g. Deal Amount by Stage), rather than a uniform ranked list.
-    function renderHBarChart(items, opts) {
-      opts = opts || {};
-      var rowH = 20, gap = 8, labelW = 160, padR = opts.valueFmt ? 90 : 60, W = 760;
-      var maxVal = Math.max.apply(null, items.map(function (it) { return it.value; }).concat([1]));
-      var plotW = W - labelW - padR;
-      var H = items.length * (rowH + gap) + 10;
-      var rows = items.map(function (it, i) {
-        var y = 6 + i * (rowH + gap);
-        var w = maxVal > 0 ? (it.value / maxVal) * plotW : 0;
-        var color = opts.colors ? opts.colors[i % opts.colors.length] : (opts.barColor || "#bfe0cd");
-        var valueLabel = opts.valueFmt
-          ? '<text class="axis-label" x="' + (labelW + w + 6) + '" y="' + (y + rowH * 0.7) + '">' + opts.valueFmt(it.value) + '</text>'
-          : "";
-        var tip = tipAttrs(it.label, [opts.valueFmt ? opts.valueFmt(it.value) : it.value], color);
-        return '<text class="axis-label" x="' + (labelW - 8) + '" y="' + (y + rowH * 0.7) + '" text-anchor="end">' +
-          escapeHtml(it.label) + '</text>' +
-          '<rect x="' + labelW + '" y="' + y + '" width="' + w.toFixed(1) + '" height="' + rowH + '" rx="2" fill="' + color + '" ' + tip + '/>' +
-          valueLabel;
-      }).join("");
-      return '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '">' + rows + "</svg>";
-    }
-
-    function renderLineChart(values, xLabels, opts) {
-      opts = opts || {};
-      var f = chartFrame(xLabels.length);
-      var allVals = values.filter(function (v) { return v != null; });
-      var yMax = (opts.yMax != null ? opts.yMax : Math.max.apply(null, allVals.length ? allVals : [1])) * 1.15;
-      var yMin = opts.yMin != null ? opts.yMin : 0;
-      var axes = gridAndAxes(f, yMin, yMax, opts.yFmt || function (v) { return Math.round(v); }, xLabels);
-      var stepX = f.n <= 1 ? 0 : f.plotW / (f.n - 1);
-      var points = values.map(function (v, i) {
-        if (v == null) return null;
-        return { x: f.padL + i * stepX, y: axes.yScale(v), v: v };
-      });
-      var segs = [], cur = [];
-      points.forEach(function (p) { if (p == null) { if (cur.length) { segs.push(cur); cur = []; } } else cur.push(p); });
-      if (cur.length) segs.push(cur);
-      var path = segs.map(function (seg) {
-        return "M" + seg.map(function (p) { return p.x.toFixed(1) + "," + p.y.toFixed(1); }).join("L");
-      }).join(" ");
-      var color = opts.lineColor || "#14201c";
-      var dots = points.map(function (p, i) {
-        if (p == null) return "";
-        var lines = [opts.yFmt ? opts.yFmt(p.v) : p.v];
-        return '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="9" fill="transparent" ' +
-          tipAttrs(xLabels[i], lines, color) + '/>' +
-          '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="3" fill="' + color + '"/>';
-      }).join("");
-      return '<svg class="chart" viewBox="0 0 ' + f.W + ' ' + f.H + '">' +
-        axes.gridlines + axes.yLabels + axes.xLabelsSvg +
-        '<path d="' + path + '" fill="none" stroke="' + color + '" stroke-width="2"/>' + dots + "</svg>";
-    }
-
-    function polarToCartesian(cx, cy, r, angleDeg) {
-      var a = (angleDeg - 90) * Math.PI / 180;
-      return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
-    }
-    function describeSlice(cx, cy, r, startAngle, endAngle) {
-      var start = polarToCartesian(cx, cy, r, endAngle);
-      var end = polarToCartesian(cx, cy, r, startAngle);
-      var largeArc = endAngle - startAngle <= 180 ? "0" : "1";
-      return ["M", cx, cy, "L", start.x, start.y, "A", r, r, 0, largeArc, 0, end.x, end.y, "Z"].join(" ");
-    }
-    // Matches the Power BI reference: legend shows only category (color dot +
-    // name), while value/percent are shown as leader-line callouts pointing out
-    // from each slice rather than in the legend.
-    function renderPieChart(items, colors, opts) {
-      opts = opts || {};
-      var valueFmt = opts.valueFmt || fmtMoneyAbbrev;
-      var total = items.reduce(function (s, it) { return s + it.value; }, 0) || 1;
-      var W = 440, H = 260, cx = 190, cy = 130, r = 85, angle = 0, slices = "", callouts = "";
-      function calloutLabel(it, midAngle) {
-        var pEdge = polarToCartesian(cx, cy, r, midAngle);
-        var pElbow = polarToCartesian(cx, cy, r + 18, midAngle);
-        var isRight = pElbow.x >= cx;
-        var labelX = isRight ? pElbow.x + 12 : pElbow.x - 12;
-        var pct = (it.value / total * 100).toFixed(2);
-        return '<path d="M' + pEdge.x.toFixed(1) + ',' + pEdge.y.toFixed(1) + 'L' + pElbow.x.toFixed(1) + ',' + pElbow.y.toFixed(1) +
-          'L' + labelX.toFixed(1) + ',' + pElbow.y.toFixed(1) + '" fill="none" stroke="#b7b7b7" stroke-width="1"/>' +
-          '<text x="' + (labelX + (isRight ? 3 : -3)).toFixed(1) + '" y="' + (pElbow.y + 3.5).toFixed(1) +
-          '" text-anchor="' + (isRight ? "start" : "end") + '" font-size="12" fill="#434343">' +
-          escapeHtml(valueFmt(it.value) + " (" + pct + "%)") + "</text>";
-      }
-      if (items.length === 1) {
-        slices = '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + colors[0] + '" ' +
-          tipAttrs(items[0].label, [valueFmt(items[0].value) + " · 100%"], colors[0]) + '/>';
-        callouts = calloutLabel(items[0], 0);
-      } else {
-        items.forEach(function (it, i) {
-          var sweep = (it.value / total) * 360;
-          var pct = (it.value / total * 100).toFixed(0);
-          slices += '<path d="' + describeSlice(cx, cy, r, angle, angle + sweep) + '" fill="' + colors[i % colors.length] + '" ' +
-            tipAttrs(it.label, [valueFmt(it.value) + " · " + pct + "%"], colors[i % colors.length]) + '/>';
-          callouts += calloutLabel(it, angle + sweep / 2);
-          angle += sweep;
-        });
-      }
-      var legend = items.map(function (it, i) {
-        return '<div class="legend-item"><span class="legend-swatch legend-swatch--dot" style="background:' + colors[i % colors.length] + '"></span>' +
-          escapeHtml(it.label) + "</div>";
-      }).join("");
-      return '<div style="display:flex;gap:24px;align-items:center;justify-content:center;flex-wrap:wrap;">' +
-        '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:440px;height:auto;flex:1 1 320px;">' + slices + callouts + '</svg>' +
-        '<div class="legend" style="flex-direction:column;align-items:flex-start;gap:8px;flex:0 0 auto;">' + legend + '</div>' +
-        '</div>';
-    }
-
-    // ---- App state ----
-    var RAW = { revenue: [], projects: [], deals: [], utilisation: [], certifications: [], targetRates: [] };
+    // ---- State ----
+    var RAW = null;
+    var ENTITIES = [];
+    var MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var MONTH_UNIVERSE = [];
     var CURRENT_SESSION = { email: null, role: null };
 
+    var STATE = {
+      entity: null,
+      page: 'takeaways',
+      selectedMonths: null,
+      periodPanelOpen: false,
+      compareBasis: 'ytd',
+      divisionFilter: 'all',
+      projectsFilter: 'all',
+      role: 'viewer',
+      email: null,
+      isAccessAdmin: false,
+      modal: { kind: null },
+    };
+
+    var NAV_ITEMS = [
+      { key: 'takeaways', label: 'Takeaways' },
+      { key: 'revenue', label: 'Revenue' },
+      { key: 'clients', label: 'Clients' },
+      { key: 'projects', label: 'Projects' },
+      { key: 'deals', label: 'Deals' },
+      { key: 'employees', label: 'Employees' },
+      { key: 'margins', label: 'Margins' },
+      { key: 'cost', label: 'Cost' },
+      { key: 'utilisation', label: 'Utilisation' },
+      { key: 'certifications', label: 'Alliances' },
+    ];
+
+    var COMPARE_PREFIX = {
+      previousPeriod: 'Last month',
+      lastQuarterEnd: 'End of last quarter',
+      sameTimeLastYear: 'Selected month last year',
+      ytd: 'Start of financial year',
+    };
+    var COMPARE_OPTIONS = [
+      { key: 'previousPeriod', label: 'Last month' },
+      { key: 'lastQuarterEnd', label: 'End of last quarter' },
+      { key: 'ytd', label: 'vs start of financial year' },
+      { key: 'sameTimeLastYear', label: 'Selected month last year' },
+    ];
+
+    // No hardcoded 4th-OpCo legacy-source split here (see plan notes) — every
+    // entity present in the live semantic model is read from the same shared
+    // tables uniformly.
+    var COMBINED_ENTITY_LABEL = 'Omnia Collective';
+    var COMBINED_ENTITIES = []; // populated in onDataLoaded from whatever entities the live data actually has
+    function entityMatches(rowEntityValue) {
+      if (STATE.entity === COMBINED_ENTITY_LABEL) return COMBINED_ENTITIES.indexOf(rowEntityValue) !== -1;
+      return rowEntityValue === STATE.entity;
+    }
+
+    // ---- Date / month-universe helpers (ported from the Apps Script Omnia
+    // Reporting engine, so this file's period model behaves identically) ----
+    function monthKey(d) { return d.getFullYear() + '-' + (d.getMonth() + 1); }
+    function firstOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
+    function addMonths(d, n) { return new Date(d.getFullYear(), d.getMonth() + n, 1); }
+    function fyEndYear(d) { var m = d.getMonth(); return m >= 6 ? d.getFullYear() + 1 : d.getFullYear(); }
+    function fyLabel(endYear) { return 'FY' + String(endYear).slice(-2); }
+    function fyStart(fyEnd) { return new Date(fyEnd - 1, 6, 1); }
+    function monthYYLabel(d) { return MONTH_NAMES[d.getMonth()] + '-' + String(d.getFullYear()).slice(-2); }
+    function monthYearLabel(d) { return MONTH_NAMES[d.getMonth()] + ' ' + d.getFullYear(); }
+    function rangeMonths(start, end) {
+      var out = []; var cursor = new Date(start);
+      while (cursor <= end) { out.push(new Date(cursor)); cursor = addMonths(cursor, 1); }
+      return out;
+    }
+
+    function buildMonthUniverse() {
+      var seenAll = {};
+      var seenFact = {};
+      function add(dateStr, map) {
+        if (!dateStr) return;
+        var d = new Date(dateStr);
+        if (isNaN(d)) return;
+        map[monthKey(firstOfMonth(d))] = firstOfMonth(d);
+      }
+      (RAW.revenueTarget || []).forEach(function (r) { add(r.month_date, seenAll); });
+      (RAW.unifiedFact || []).forEach(function (r) { add(r.month_date, seenAll); add(r.month_date, seenFact); });
+      var allDates = Object.keys(seenAll).map(function (k) { return seenAll[k]; }).sort(function (a, b) { return a - b; });
+      var factDates = Object.keys(seenFact).map(function (k) { return seenFact[k]; }).sort(function (a, b) { return a - b; });
+      if (!allDates.length) { MONTH_UNIVERSE = []; return; }
+      var minDate = factDates.length ? factDates[0] : allDates[0];
+      var maxDate = allDates[allDates.length - 1];
+      MONTH_UNIVERSE = rangeMonths(minDate, maxDate);
+    }
+
+    function isMonthInProgress(m) {
+      var today = new Date();
+      return m.getFullYear() === today.getFullYear() && m.getMonth() === today.getMonth();
+    }
+    function currentMonthWithData() {
+      var today = firstOfMonth(new Date());
+      var candidates = MONTH_UNIVERSE.filter(function (d) { return d <= today; });
+      if (candidates.length) return candidates[candidates.length - 1];
+      return MONTH_UNIVERSE.length ? MONTH_UNIVERSE[MONTH_UNIVERSE.length - 1] : today;
+    }
+    function quarterEndOfPreviousQuarter(d) {
+      var q = Math.floor(d.getMonth() / 3);
+      var prevQ = q - 1, year = d.getFullYear();
+      if (prevQ < 0) { prevQ = 3; year -= 1; }
+      return new Date(year, prevQ * 3 + 2, 1);
+    }
+    function defaultMonthSelection() {
+      var cur = currentMonthWithData();
+      var start = addMonths(cur, -11);
+      if (MONTH_UNIVERSE.length && start < MONTH_UNIVERSE[0]) start = MONTH_UNIVERSE[0];
+      var sel = new Set();
+      rangeMonths(start, cur).forEach(function (m) { sel.add(monthKey(m)); });
+      return sel;
+    }
+    function groupByFy() {
+      var groups = {};
+      MONTH_UNIVERSE.forEach(function (m) {
+        var fy = fyEndYear(m);
+        groups[fy] = groups[fy] || [];
+        groups[fy].push(m);
+      });
+      return Object.keys(groups).map(Number).sort(function (a, b) { return a - b; }).map(function (fy) {
+        return { fyEndYear: fy, label: fyLabel(fy) + ' (' + monthYYLabel(groups[fy][0]) + ' – ' + monthYYLabel(groups[fy][groups[fy].length - 1]) + ')', months: groups[fy] };
+      });
+    }
+
+    function periodBounds() {
+      var months = MONTH_UNIVERSE.filter(function (m) { return STATE.selectedMonths.has(monthKey(m)); });
+      if (!months.length) return null;
+      return { months: months, start: months[0], end: months[months.length - 1], span: months.length };
+    }
+    function comparisonBounds() {
+      var b = periodBounds();
+      if (!b) return null;
+      if (STATE.compareBasis === 'ytd') {
+        var fyStartMonth = fyStart(fyEndYear(b.end));
+        return { start: fyStartMonth, end: fyStartMonth, months: [fyStartMonth] };
+      }
+      if (STATE.compareBasis === 'lastQuarterEnd') {
+        var cmpEnd = quarterEndOfPreviousQuarter(b.end);
+        var cmpStart = addMonths(cmpEnd, -(b.span - 1));
+        return { start: cmpStart, end: cmpEnd, months: rangeMonths(cmpStart, cmpEnd) };
+      }
+      var shift = STATE.compareBasis === 'sameTimeLastYear' ? 12 : b.span;
+      var start = addMonths(b.start, -shift);
+      var end = addMonths(b.end, -shift);
+      return { start: start, end: end, months: rangeMonths(start, end) };
+    }
+    function cardComparisonTargetMonth() {
+      var b = periodBounds();
+      if (!b) return null;
+      var reportingMonth = b.end;
+      if (STATE.compareBasis === 'lastQuarterEnd') return quarterEndOfPreviousQuarter(reportingMonth);
+      if (STATE.compareBasis === 'sameTimeLastYear') return addMonths(reportingMonth, -12);
+      if (STATE.compareBasis === 'ytd') return fyStart(fyEndYear(reportingMonth));
+      return addMonths(reportingMonth, -1);
+    }
+    function cardMonths() {
+      var b = periodBounds();
+      if (!b) return [];
+      return [b.end];
+    }
+    function cardComparisonMonths() {
+      var target = cardComparisonTargetMonth();
+      return target ? [target] : [];
+    }
+    function periodLabelText() {
+      var b = periodBounds();
+      if (!b) return 'selected period';
+      return b.span === 1 ? monthYearLabel(b.start) : monthYearLabel(b.start) + ' – ' + monthYearLabel(b.end);
+    }
+    function cardPeriodLabelText() {
+      var b = periodBounds();
+      if (!b) return 'selected period';
+      return monthYearLabel(b.end);
+    }
+
+    // ---- Header / nav ----
+    function renderHeader(entities) {
+      var pillsEl = document.getElementById('oc-company-pills');
+      pillsEl.innerHTML = entities.map(function (e) {
+        return '<button class="oc-pill' + (e === STATE.entity ? ' active' : '') + '" data-entity="' + escAttr(e) + '">' + escHtml(e) + '</button>';
+      }).join('');
+      Array.prototype.forEach.call(pillsEl.querySelectorAll('.oc-pill'), function (btn) {
+        btn.addEventListener('click', function () {
+          STATE.entity = btn.getAttribute('data-entity');
+          renderHeader(entities);
+          renderPage();
+        });
+      });
+
+      renderPeriodPicker();
+      renderCompareSelect();
+      renderCompareDates();
+
+      var divisions = uniqueDivisions(RAW);
+      var divSelect = document.getElementById('oc-division-select');
+      divSelect.innerHTML = '<option value="all">All divisions</option>' +
+        divisions.map(function (d) { return '<option value="' + escAttr(d) + '">' + escHtml(d) + '</option>'; }).join('');
+      divSelect.value = STATE.divisionFilter;
+      divSelect.onchange = function () { STATE.divisionFilter = divSelect.value; renderPage(); };
+
+      var projectsSelect = document.getElementById('oc-projects-select');
+      projectsSelect.value = STATE.projectsFilter || 'all';
+      projectsSelect.onchange = function () { STATE.projectsFilter = projectsSelect.value; renderPage(); };
+
+      var navEl = document.getElementById('oc-nav');
+      navEl.innerHTML = NAV_ITEMS.map(function (n) {
+        return '<button class="oc-nav-btn' + (n.key === STATE.page ? ' active' : '') + '" data-page="' + n.key + '">' + n.label + '</button>';
+      }).join('');
+      Array.prototype.forEach.call(navEl.querySelectorAll('.oc-nav-btn'), function (btn) {
+        btn.addEventListener('click', function () {
+          STATE.page = btn.getAttribute('data-page');
+          renderHeader(entities);
+          renderPage();
+        });
+      });
+    }
+
+    function uniqueDivisions(data) {
+      var set = {};
+      (data.unifiedFact || []).forEach(function (r) { if (r.project_stream) set[r.project_stream] = true; });
+      return Object.keys(set).sort();
+    }
+
+    function renderPeriodPicker() {
+      var wrap = document.getElementById('oc-period-wrap');
+      var b = periodBounds();
+      var groups = groupByFy();
+      var realCurKey = monthKey(firstOfMonth(new Date()));
+      var today = firstOfMonth(new Date());
+      var reportingKey = b ? monthKey(b.end) : null;
+      var label = b ? monthYearLabel(b.end) : 'No month selected';
+
+      var html = '<button class="oc-period-btn" id="oc-period-toggle">' +
+        '<span class="oc-eyebrow-inline">Reporting period</span><span>' + label + '</span>' +
+        '<span style="font-size:10px; color:var(--fg-on-dark-3);">&#9662;</span></button>';
+
+      html += '<div class="oc-period-panel' + (STATE.periodPanelOpen ? ' open' : '') + '" id="oc-period-panel">';
+      html += '<div class="oc-period-panel-head"><div class="oc-period-panel-title">Select a reporting month</div><button class="oc-period-done" id="oc-period-done">Done</button></div>';
+      html += '<div class="oc-note" style="margin-bottom:12px;">Cards show figures for the month you pick. Charts show the trailing 12 months through the picked month (or fewer, if less than 12 months of data exist yet).</div>';
+      if (STATE.selectedMonths.has(realCurKey)) {
+        html += '<div class="oc-banner">' + MONTH_NAMES[today.getMonth()] + ' ' + today.getFullYear() + ' is still in progress — figures for that month may be incomplete until the period closes.</div>';
+      }
+      html += '<div class="oc-presets"><button class="oc-preset-btn" data-preset="thisMonth">Latest month</button></div>';
+
+      groups.slice().reverse().forEach(function (g) {
+        var availableMonths = g.months.filter(function (m) { return m <= today; });
+        if (!availableMonths.length) return;
+        html += '<div class="oc-fy-group"><div class="oc-fy-head" style="cursor:default;"><span class="oc-fy-label">' + g.label + '</span></div><div class="oc-month-grid">' +
+          availableMonths.slice().reverse().map(function (m) {
+            var k = monthKey(m);
+            var selected = k === reportingKey;
+            var isNow = k === realCurKey;
+            return '<button class="oc-month-btn' + (selected ? ' checked' : '') + '" data-month="' + k + '">' +
+              '<span class="oc-month-checkbox" style="border-radius:50%;">' + (selected ? '&#10003;' : '') + '</span>' +
+              '<span class="oc-month-btn-label">' + monthYYLabel(m) + (isNow ? '<span class="oc-now-dot"></span>' : '') + '</span></button>';
+          }).join('') + '</div></div>';
+      });
+      html += '<div class="oc-period-footnote"><span class="oc-now-dot"></span>Current month</div></div>';
+      wrap.innerHTML = html;
+
+      document.getElementById('oc-period-toggle').addEventListener('click', function (e) {
+        e.stopPropagation();
+        STATE.periodPanelOpen = !STATE.periodPanelOpen;
+        renderPeriodPicker();
+      });
+      if (STATE.periodPanelOpen) {
+        document.getElementById('oc-period-done').addEventListener('click', function () {
+          STATE.periodPanelOpen = false;
+          renderPeriodPicker();
+        });
+        Array.prototype.forEach.call(wrap.querySelectorAll('.oc-month-btn'), function (btn) {
+          btn.addEventListener('click', function () {
+            selectReportingMonth(btn.getAttribute('data-month'));
+            renderPeriodPicker(); renderCompareSelect(); renderCompareDates(); renderPage();
+          });
+        });
+        Array.prototype.forEach.call(wrap.querySelectorAll('.oc-preset-btn'), function (btn) {
+          btn.addEventListener('click', function () {
+            if (btn.getAttribute('data-preset') === 'thisMonth') selectReportingMonth(monthKey(currentMonthWithData()));
+            renderPeriodPicker(); renderCompareSelect(); renderCompareDates(); renderPage();
+          });
+        });
+      }
+    }
+
+    function selectReportingMonth(monthKeyStr) {
+      var m = MONTH_UNIVERSE.filter(function (mm) { return monthKey(mm) === monthKeyStr; })[0];
+      if (!m) return;
+      var start = addMonths(m, -11);
+      if (MONTH_UNIVERSE.length && start < MONTH_UNIVERSE[0]) start = MONTH_UNIVERSE[0];
+      var sel = new Set();
+      rangeMonths(start, m).forEach(function (mm) { sel.add(monthKey(mm)); });
+      STATE.selectedMonths = sel;
+    }
+
+    function renderCompareSelect() {
+      var select = document.getElementById('oc-compare-select');
+      if (!select) return;
+      select.innerHTML = COMPARE_OPTIONS.map(function (o) { return '<option value="' + o.key + '">' + o.label + '</option>'; }).join('');
+      select.value = STATE.compareBasis;
+      select.onchange = function () { STATE.compareBasis = select.value; renderCompareDates(); renderPage(); };
+    }
+    function renderCompareDates() {
+      var el = document.getElementById('oc-compare-dates');
+      if (!el) return;
+      var b = periodBounds();
+      if (!b) { el.innerHTML = ''; return; }
+      var cmpMonth = cardComparisonTargetMonth();
+      if (!cmpMonth) { el.innerHTML = ''; return; }
+      el.innerHTML = COMPARE_PREFIX[STATE.compareBasis] + ' — <strong>' + monthYYLabel(cmpMonth) + '</strong>';
+    }
+
+    // ---- Row filtering (mirrors the Apps Script engine's rowsForMonths) ----
+    function rowsForMonths(rows, dateField, entityField, monthDates) {
+      var keySet = {}; monthDates.forEach(function (m) { keySet[monthKey(m)] = true; });
+      return rows.filter(function (r) {
+        if (entityField && !entityMatches(r[entityField])) return false;
+        if (STATE.divisionFilter !== 'all' && Object.prototype.hasOwnProperty.call(r, 'project_stream') && r.project_stream !== STATE.divisionFilter) return false;
+        if (STATE.projectsFilter === 'ai' && Object.prototype.hasOwnProperty.call(r, 'project_stream') && (r.project_stream || '').toLowerCase() !== 'ai') return false;
+        var d = r[dateField];
+        if (!d) return false;
+        var dt = new Date(d);
+        if (isNaN(dt)) return false;
+        return !!keySet[monthKey(firstOfMonth(dt))];
+      });
+    }
+    function cardPeriodRows(rows, dateField, entityField) {
+      return rowsForMonths(rows, dateField, entityField, cardMonths());
+    }
+    function cardComparisonRows(rows, dateField, entityField) {
+      return rowsForMonths(rows, dateField, entityField, cardComparisonMonths());
+    }
+    function currentPeriodRows(rows, dateField, entityField) {
+      var b = periodBounds();
+      if (!b) return [];
+      return rowsForMonths(rows, dateField, entityField, b.months);
+    }
+    function comparisonPeriodRows(rows, dateField, entityField) {
+      var cmp = comparisonBounds();
+      if (!cmp) return [];
+      return rowsForMonths(rows, dateField, entityField, cmp.months);
+    }
+
+    // ---- Chart label sizing ----
+    function chartLabelSizes(count) {
+      if (count <= 6) return { value: 11, month: 11, year: 9, minWidth: 34 };
+      if (count <= 10) return { value: 10, month: 10.5, year: 8.5, minWidth: 28 };
+      if (count <= 16) return { value: 9, month: 9.5, year: 8, minWidth: 22 };
+      if (count <= 24) return { value: 8, month: 8.5, year: 7, minWidth: 18 };
+      return { value: 7, month: 7.5, year: 6.5, minWidth: 14 };
+    }
+
+    // ---- Sparkline chart (SVG polyline, auto-zoomed y-axis) ----
+    function sparkXPercent(i, count) {
+      var inset = 6, usable = 100 - inset * 2;
+      if (count <= 1) return 50;
+      var refN = 12;
+      var spreadPct = Math.min(usable, ((count - 1) / (refN - 1)) * usable);
+      var offset = inset + (usable - spreadPct) / 2;
+      return offset + (i / (count - 1)) * spreadPct;
+    }
+    function renderSparklineCard(metric, series, months, pointTitles, forecastFlags, flagInProgress, targetSeries, heightPx) {
+      heightPx = heightPx || 130;
+      var vals = series.filter(function (v) { return v != null; });
+      var targetVals = targetSeries ? targetSeries.filter(function (v) { return v != null; }) : [];
+      var allVals = vals.concat(targetVals);
+      var rawMax = allVals.length ? Math.max.apply(null, allVals) : 0;
+      var rawMin = allVals.length ? Math.min.apply(null, allVals) : 0;
+      var rawRange = rawMax - rawMin;
+      var padding = rawRange > 0 ? rawRange * 0.15 : (Math.abs(rawMax) * 0.1 || 1);
+      var maxV = rawMax + padding;
+      var minV = rawMin - padding;
+      var range = (maxV - minV) || 1;
+      var count = series.length;
+      var sizes = chartLabelSizes(months.length);
+      var anyInProgress = false;
+
+      function toY(v) { return 34 - ((v - minV) / range) * 22 - 6; }
+      var points = series.map(function (v, i) { if (v == null) return null; return { x: sparkXPercent(i, count), y: toY(v), v: v }; });
+      var targetPoints = targetSeries ? targetSeries.map(function (v, i) { if (v == null) return null; return { x: sparkXPercent(i, count), y: toY(v), v: v }; }) : [];
+      function buildPolylineSegments(pts, stroke, strokeWidth, dashArray) {
+        var segments = [], current = [];
+        pts.forEach(function (p) { if (p) { current.push(p); } else { if (current.length > 1) segments.push(current); current = []; } });
+        if (current.length > 1) segments.push(current);
+        return segments.map(function (seg) {
+          return '<polyline points="' + seg.map(function (p) { return p.x.toFixed(1) + ',' + p.y.toFixed(1); }).join(' ') + '" fill="none" stroke="' + stroke + '" stroke-width="' + strokeWidth + '"' + (dashArray ? ' stroke-dasharray="' + dashArray + '"' : '') + ' vector-effect="non-scaling-stroke"></polyline>';
+        }).join('');
+      }
+      var targetPolylineHtml = buildPolylineSegments(targetPoints, 'var(--oc-coral)', '1.2', '3,2');
+      var polylineHtml = buildPolylineSegments(points, metric.color, '1.4', null);
+      var dots = points.map(function (p, i) {
+        if (p) {
+          var inProgress = flagInProgress && isMonthInProgress(months[i]);
+          if (inProgress) anyInProgress = true;
+          var defaultTitle = monthYearLabel(months[i]) + ': ' + metric.fmt(p.v) + (inProgress ? ' (known — month in progress)' : '');
+          var title = (pointTitles && pointTitles[i]) ? pointTitles[i] : defaultTitle;
+          var dotStyle = inProgress ? 'background:var(--bg); border:2px dashed var(--oc-mint-deep);' : 'background:' + metric.color + ';';
+          return '<div class="oc-spark-dot" style="left:' + p.x.toFixed(1) + '%; top:' + ((p.y / 34) * 100).toFixed(1) + '%; ' + dotStyle + '" title="' + title.replace(/"/g, '&quot;') + '"></div>';
+        }
+        if (forecastFlags && forecastFlags[i]) {
+          var x = sparkXPercent(i, count);
+          var phTitle = (pointTitles && pointTitles[i]) ? pointTitles[i] : (monthYearLabel(months[i]) + ': no data yet');
+          return '<div style="position:absolute; left:' + x.toFixed(1) + '%; top:50%; width:9px; height:9px; margin:-4.5px 0 0 -4.5px; border-radius:50%; border:1.5px dashed ' + metric.color + '; background:var(--bg);" title="' + phTitle.replace(/"/g, '&quot;') + '"></div>';
+        }
+        return '';
+      }).join('');
+
+      function computeIsAbove(pts, i) {
+        var p = pts[i]; if (!p) return true;
+        var prev = pts[i - 1] || null, next = pts[i + 1] || null;
+        if (prev && next) {
+          if (p.y <= prev.y && p.y <= next.y) return true;
+          if (p.y >= prev.y && p.y >= next.y) return false;
+          return p.y <= (prev.y + next.y) / 2;
+        }
+        if (prev) return p.y <= prev.y;
+        if (next) return p.y <= next.y;
+        return true;
+      }
+      function labelDiv(p, isAbove, color, fontSize, extraPush) {
+        var topPct = (p.y / 34) * 100;
+        var push = 10 + (extraPush || 0);
+        var offset = isAbove ? 'transform:translate(-50%, -100%); margin-top:-' + push + 'px;' : 'transform:translate(-50%, 0%); margin-top:' + (push + 2) + 'px;';
+        return '<div style="position:absolute; left:' + p.x.toFixed(1) + '%; top:' + topPct.toFixed(1) + '%; ' + offset + ' font-size:' + fontSize + 'px; font-weight:700; color:' + color + '; white-space:nowrap; pointer-events:none;">';
+      }
+      function closeValuesPush(i) {
+        if (!points[i] || !targetPoints[i]) return 0;
+        var yDiff = Math.abs(points[i].y - targetPoints[i].y);
+        return yDiff < 4 ? (4 - yDiff) * 2 : 0;
+      }
+      var dataLabelsHtml = points.map(function (p, i) {
+        if (!p) return '';
+        var isAbove = computeIsAbove(points, i);
+        return labelDiv(p, isAbove, metric.color, Math.max(sizes.month - 1, 9), closeValuesPush(i)) + metric.fmt(p.v) + '</div>';
+      }).join('');
+      var targetDataLabelsHtml = targetPoints.map(function (p, i) {
+        if (!p) return '';
+        var isAbove = points[i] ? !computeIsAbove(points, i) : computeIsAbove(targetPoints, i);
+        return labelDiv(p, isAbove, 'var(--oc-coral)', Math.max(sizes.month - 2, 8), closeValuesPush(i)) + metric.fmt(p.v) + '</div>';
+      }).join('');
+      var monthLabelsHtml = months.map(function (m, i) {
+        var x = sparkXPercent(i, count);
+        return '<div style="position:absolute; left:' + x.toFixed(1) + '%; top:0; transform:translateX(-50%); text-align:center; white-space:nowrap;">' +
+          '<div style="font-size:' + sizes.month + 'px; font-weight:700; color:var(--fg2);">' + MONTH_NAMES[m.getMonth()] + '</div>' +
+          '<div style="font-size:' + Math.max(sizes.year - 1, 7) + 'px; color:var(--fg3); opacity:0.8;">' + m.getFullYear() + '</div></div>';
+      }).join('');
+
+      var legendExtra = anyInProgress ? ' <span class="oc-sw-dash" style="border-color:var(--oc-mint-deep); margin-left:8px;"></span> Current month (known)' : '';
+      var actualLabel = metric.actualLabel || 'Actual';
+      var targetLabel = metric.targetLabel || 'Target';
+      var hasActualData = vals.length > 0;
+      var hasTargetData = targetVals.length > 0;
+      var targetLegend = hasTargetData ? ' <span class="oc-sw-dash" style="border-color:var(--oc-coral); margin-left:8px;"></span> ' + targetLabel : '';
+      var actualLegendHtml = hasActualData ? '<span class="oc-sw-dash" style="border-style:solid; border-color:' + metric.color + ';"></span>' + actualLabel : '';
+
+      return '<div>' +
+        '<div class="oc-multiple-head"><div class="oc-multiple-label">' + metric.label + '</div><div class="oc-multiple-legend">' + actualLegendHtml + legendExtra + targetLegend + '</div></div>' +
+        '<div class="oc-spark-wrap"><svg viewBox="0 0 100 34" style="width:100%; height:' + heightPx + 'px;" preserveAspectRatio="none">' +
+          (hasTargetData ? targetPolylineHtml : '') + (hasActualData ? polylineHtml : '') +
+        '</svg>' + dots + dataLabelsHtml + targetDataLabelsHtml + '</div>' +
+        '<div style="position:relative; height:26px; margin-top:6px;">' + monthLabelsHtml + '</div></div>';
+    }
+
+    // ---- Bar-trend chart (0-anchored CSS bars, up to 2 target/forecast series) ----
+    function renderBarTrendChart(metric, series, months, targetSeries, forecastFlags, target2Series, target2Label) {
+      var vals = series.filter(function (v) { return v != null; });
+      var targetVals = (targetSeries || []).filter(function (v) { return v != null; });
+      var target2Vals = (target2Series || []).filter(function (v) { return v != null; });
+      var allVals = vals.concat(targetVals).concat(target2Vals);
+      var maxVal = allVals.length ? Math.max.apply(null, allVals.concat([0])) : 1;
+      var minVal = allVals.length ? Math.min.apply(null, allVals.concat([0])) : 0;
+      var scaleMax = Math.max(maxVal, 0.0001);
+      var scaleMin = Math.min(minVal, 0);
+      var range = scaleMax - scaleMin || 1;
+      var sizes = chartLabelSizes(months.length);
+      var hasTargetData = targetVals.length > 0;
+      var hasTarget2Data = target2Vals.length > 0;
+      var actualLabel = metric.actualLabel || 'Actual';
+      var targetLabel = metric.targetLabel || 'Target';
+      var t2Label = target2Label || 'Forecast';
+      var FORECAST_COLOR = '#4FC3F7';
+      var TARGET_COLOR = 'var(--oc-coral)';
+      var targetIsForecast = targetLabel === 'Forecast';
+      var t2IsForecast = t2Label === 'Forecast';
+      var targetColor = targetIsForecast ? FORECAST_COLOR : TARGET_COLOR;
+      var t2Color = t2IsForecast ? FORECAST_COLOR : TARGET_COLOR;
+
+      var barsHtml = months.map(function (m, i) {
+        var v = series[i];
+        var t = (targetSeries || [])[i];
+        var t2 = (target2Series || [])[i];
+        var isForecast = forecastFlags && forecastFlags[i];
+        function forecastBarHtml(val, color) {
+          var fHeightPct = ((val - scaleMin) / range) * 100;
+          var fZeroPct = ((0 - scaleMin) / range) * 100;
+          var fBarTop = val >= 0 ? (100 - fHeightPct) : (100 - fZeroPct);
+          var fBarHeight = Math.abs(fHeightPct - fZeroPct);
+          return '<div class="oc-cum-bar" style="height:' + fBarHeight.toFixed(1) + '%; top:' + fBarTop.toFixed(1) + '%; position:absolute; left:50%; transform:translateX(-50%); width:100%; max-width:34px; background:transparent; border:2px dashed ' + color + '; box-sizing:border-box;" title="Forecast — ' + metric.fmt(val) + '"></div>';
+        }
+        var t2LineHtml = (t2 != null && !t2IsForecast) ? '<div class="oc-cum-target-line" style="top:' + (100 - ((t2 - scaleMin) / range) * 100).toFixed(1) + '%; border-top-color:' + t2Color + ';" title="' + t2Label + ' — ' + metric.fmt(t2) + '"></div>' : '';
+        function stackedLabelHtml(vActual, tVal, t2Val) {
+          var parts = [];
+          if (vActual != null) parts.push(metric.fmt(vActual));
+          if (tVal != null) parts.push('<span style="color:' + targetColor + ';">' + targetLabel.charAt(0) + ': ' + metric.fmt(tVal) + '</span>');
+          if (t2Val != null) parts.push('<span style="color:' + t2Color + ';">' + t2Label.charAt(0) + ': ' + metric.fmt(t2Val) + '</span>');
+          return '<div class="oc-cum-label" style="font-size:' + sizes.value + 'px; line-height:1.4;">' + parts.join('<br>') + '</div>';
+        }
+        if (v == null) {
+          if (t == null && t2 == null) return '<div class="oc-cum-col"><div class="oc-cum-bar-wrap"></div></div>';
+          var fTargetTopPct = (t != null && !targetIsForecast) ? 100 - ((t - scaleMin) / range) * 100 : null;
+          var forecastVal = targetIsForecast ? t : (t2IsForecast ? t2 : null);
+          var forecastColor = targetIsForecast ? targetColor : t2Color;
+          var forecastLbl = targetIsForecast ? targetLabel : t2Label;
+          var genuineTarget = (fTargetTopPct != null) ? t : ((t2 != null && !t2IsForecast) ? t2 : null);
+          var genuineTargetColor = (fTargetTopPct != null) ? targetColor : t2Color;
+          var genuineTargetLbl = (fTargetTopPct != null) ? targetLabel : t2Label;
+          var noActualParts = [];
+          if (genuineTarget != null) noActualParts.push('<span style="color:' + genuineTargetColor + ';">' + genuineTargetLbl.charAt(0) + ': ' + metric.fmt(genuineTarget) + '</span>');
+          if (forecastVal != null) noActualParts.push('<span style="color:' + forecastColor + ';">' + forecastLbl.charAt(0) + ': ' + metric.fmt(forecastVal) + '</span>');
+          var noActualLabelHtml = noActualParts.length ? '<div class="oc-cum-label" style="font-size:' + sizes.value + 'px; line-height:1.4;">' + noActualParts.join('<br>') + '</div>' : '';
+          return '<div class="oc-cum-col">' + noActualLabelHtml +
+            '<div class="oc-cum-bar-wrap">' +
+              (fTargetTopPct != null ? '<div class="oc-cum-target-line" style="top:' + fTargetTopPct.toFixed(1) + '%;" title="' + targetLabel + ' — ' + metric.fmt(t) + '"></div>' : '') +
+              t2LineHtml + (forecastVal != null ? forecastBarHtml(forecastVal, forecastColor) : '') +
+            '</div></div>';
+        }
+        var heightPct = ((v - scaleMin) / range) * 100;
+        var zeroPct = ((0 - scaleMin) / range) * 100;
+        var barTop = v >= 0 ? (100 - heightPct) : (100 - zeroPct);
+        var barHeight = Math.abs(heightPct - zeroPct);
+        var targetTopPct = (t != null && !targetIsForecast) ? 100 - ((t - scaleMin) / range) * 100 : null;
+        var t2TopPctActualBranch = (t2 != null) ? 100 - ((t2 - scaleMin) / range) * 100 : null;
+        var t2LineHtmlActualBranch = (t2 != null) ? '<div class="oc-cum-target-line" style="top:' + t2TopPctActualBranch.toFixed(1) + '%; border-top-color:' + t2Color + ';" title="' + t2Label + ' — ' + metric.fmt(t2) + '"></div>' : '';
+        var barBg = isForecast ? 'repeating-linear-gradient(45deg, ' + metric.color + ', ' + metric.color + ' 4px, transparent 4px, transparent 8px)' : (v < 0 ? 'var(--oc-negative)' : metric.color);
+        return '<div class="oc-cum-col">' + stackedLabelHtml(v, (targetTopPct != null ? t : null), (t2 != null ? t2 : null)) +
+          '<div class="oc-cum-bar-wrap">' +
+            (targetTopPct != null ? '<div class="oc-cum-target-line" style="top:' + targetTopPct.toFixed(1) + '%;" title="' + targetLabel + ' — ' + metric.fmt(t) + '"></div>' : '') +
+            t2LineHtmlActualBranch +
+            '<div class="oc-cum-bar" style="height:' + barHeight.toFixed(1) + '%; top:' + barTop.toFixed(1) + '%; position:absolute; left:50%; transform:translateX(-50%); width:100%; max-width:34px; background:' + barBg + ';" title="' + (isForecast ? 'Forecast — ' : '') + metric.fmt(v) + '"></div>' +
+          '</div></div>';
+      }).join('');
+      var monthRowHtml = months.map(function (m) {
+        return '<div class="oc-cum-month-col"><div class="oc-cum-month-label" style="font-size:' + sizes.month + 'px;">' + MONTH_NAMES[m.getMonth()] + '</div><div class="oc-cum-year-label" style="font-size:' + sizes.year + 'px;">' + m.getFullYear() + '</div></div>';
+      }).join('');
+      var hasNegativeVal = vals.some(function (v) { return v < 0; });
+      var legend = '<div class="oc-legend"><span class="sw"><span class="oc-sw-box" style="background:' + metric.color + ';"></span>' + actualLabel + '</span>' +
+        (hasNegativeVal ? '<span class="sw"><span class="oc-sw-box" style="background:var(--oc-negative);"></span>' + actualLabel + ' (negative)</span>' : '') +
+        (hasTargetData ? '<span class="sw"><span class="oc-sw-dash" style="border-color:' + targetColor + ';"></span>' + targetLabel + '</span>' : '') +
+        (hasTarget2Data ? '<span class="sw"><span class="oc-sw-dash" style="border-color:' + t2Color + ';"></span>' + t2Label + '</span>' : '') + '</div>';
+      return legend + '<div class="oc-cum-row">' + barsHtml + '</div><div class="oc-cum-month-row">' + monthRowHtml + '</div>';
+    }
+
+    // ---- Parsers: reshape Power BI's executeQueries rows into the exact
+    // field names the ported Apps Script page logic expects (Phase 1 will
+    // widen the underlying DAX queries further; these already emit
+    // compatible shapes for what's queried today). ----
     function parseRevenueRows(rows) {
       return rows.map(function (r) {
         return {
-          month: parseDate(r["data_revenue_target[month_date]"]),
+          month_date: parseDate(r["data_revenue_target[month_date]"]),
           entity: r["data_revenue_target[entity]"],
-          revenue: r["[Revenue]"],
-          target: r["[RevenueTarget]"],
+          total_revenue: r["[Revenue]"],
+          revenue_target: r["[RevenueTarget]"],
         };
-      }).filter(function (r) { return r.month; });
+      }).filter(function (r) { return r.month_date; });
     }
     function parseProjectRows(rows) {
       return rows.map(function (r) {
         return {
-          month: parseDate(r["data_powerbi_unified_fact[month_date]"]),
+          month_date: parseDate(r["data_powerbi_unified_fact[month_date]"]),
           entity: r["data_powerbi_unified_fact[entity]"],
-          industry: r["data_powerbi_unified_fact[client_industry]"] || "Unspecified",
-          client: r["data_powerbi_unified_fact[client_name]"] || "Unknown",
-          project: r["data_powerbi_unified_fact[Project_Name]"] || "Unspecified",
-          stream: r["data_powerbi_unified_fact[project_stream]"] || "Unspecified",
-          revenue: r["[TotalRevenue]"] || 0,
+          client_industry: r["data_powerbi_unified_fact[client_industry]"] || "Unspecified",
+          client_name: r["data_powerbi_unified_fact[client_name]"] || "Unknown",
+          project_name: r["data_powerbi_unified_fact[Project_Name]"] || "Unspecified",
+          project_stream: r["data_powerbi_unified_fact[project_stream]"] || "Unspecified",
+          total_revenue: r["[TotalRevenue]"] || 0,
         };
-      }).filter(function (r) { return r.month; });
+      }).filter(function (r) { return r.month_date; });
     }
     function parseDealRows(rows) {
       return rows.map(function (r) {
-        var closeDate = parseDate(r["[CloseDate]"]);
         return {
-          company: r["[Company]"],
-          entity: r["[OmniaCompany]"],
-          dealName: r["[DealName]"] || r["[Company]"] || "Deal",
-          confidence: r["[Confidence]"] || "Unspecified",
-          stage: r["[DealStage]"],
-          bucket: stageBucket(r["[DealStage]"]),
-          closeDate: closeDate,
-          amount: r["[Amount]"] || 0,
+          Company: r["[Company]"],
+          Omnia_Company: r["[OmniaCompany]"],
+          Deal_Name: r["[DealName]"] || r["[Company]"] || "Deal",
+          Confidence: r["[Confidence]"] || "Unspecified",
+          Deal_Stage: r["[DealStage]"],
+          Close_Date: r["[CloseDate]"],
+          Amount: r["[Amount]"] || 0,
         };
-      }).filter(function (r) { return r.closeDate; });
+      }).filter(function (r) { return r.Close_Date && !isNaN(new Date(r.Close_Date)); });
     }
     function parseUtilisationRows(rows) {
       return rows.map(function (r) {
         return {
-          month: parseDate(r["[Month]"]),
-          entity: r["[Entity]"],
-          employmentBasis: r["[EmploymentBasis]"] || "Unspecified",
-          isBillable: !!r["[IsBillable]"],
+          month: r["[Month]"],
+          Omnia_Company: r["[Entity]"],
+          employment_basis: r["[EmploymentBasis]"] || "Unspecified",
+          is_billable_staff: !!r["[IsBillable]"],
           fte: r["[FTE]"] || 0,
-          dailyRate: r["[DailyRate]"],
-          invoicedDays: r["[InvoicedDays]"] || 0,
-          leaveDays: r["[LeaveDays]"] || 0,
-          utilisationPct: r["[UtilisationPct]"],
+          daily_rate: r["[DailyRate]"],
+          invoiced_days: r["[InvoicedDays]"] || 0,
+          leave_days: r["[LeaveDays]"] || 0,
+          utilisation_pct: r["[UtilisationPct]"],
           userId: r["[UserId]"],
         };
-      }).filter(function (r) { return r.month; });
+      }).filter(function (r) { return r.month && !isNaN(new Date(r.month)); });
     }
     function parseCertRows(rows) {
       return rows.map(function (r) {
         return {
-          userId: r["[UserId]"],
-          title: r["[Title]"] || "Unspecified",
-          status: r["[Status]"],
-          completionDate: parseDate(r["[CompletionDate]"]),
-          expirationDate: parseDate(r["[ExpirationDate]"]),
-        };
-      });
-    }
-    function parseTargetRateRows(rows) {
-      return rows.map(function (r) {
-        return {
-          fy: r["[FY]"],
-          grade: r["[Grade]"],
-          utilisationTarget: r["[UtilisationTarget]"],
-          dailyRateTarget: r["[DailyRateTarget]"],
+          CorpEmail: r["[UserId]"],
+          TrainingType: 'Certification',
+          TrainingTitle: r["[Title]"] || "Unspecified",
+          ActivationStatus: r["[Status]"],
+          TrainingCompletionDate: r["[CompletionDate]"],
+          ExpirationDate: r["[ExpirationDate]"],
         };
       });
     }
 
-    function computeFYOptions() {
-      var years = {};
-      RAW.revenue.forEach(function (r) { years[fyStartYear(r.month)] = true; });
-      RAW.deals.forEach(function (r) { years[fyStartYear(r.closeDate)] = true; });
-      return Object.keys(years).map(Number).sort(function (a, b) { return a - b; });
-    }
-    function computeEntityOptions() {
-      var set = {};
-      RAW.revenue.forEach(function (r) { if (r.entity) set[r.entity] = true; });
-      RAW.projects.forEach(function (r) { if (r.entity) set[r.entity] = true; });
-      return Object.keys(set).sort();
-    }
-    function latestRevenueMonth() {
-      var months = RAW.revenue.filter(function (r) { return r.revenue != null; }).map(function (r) { return r.month; });
-      if (!months.length) return new Date();
-      return new Date(Math.max.apply(null, months));
-    }
-
-    function populateFilters() {
-      var fySel = document.getElementById("fy-select");
-      var opcoSel = document.getElementById("opco-select");
-      var fyYears = computeFYOptions();
-      fySel.innerHTML = '<option value="all">All</option>' +
-        fyYears.map(function (y) { return '<option value="' + y + '">' + fyLabel(y) + '</option>'; }).join("");
-      var entities = computeEntityOptions();
-      opcoSel.innerHTML = '<option value="All">All OpCos</option>' +
-        entities.map(function (e) { return '<option value="' + escapeHtml(e) + '">' + escapeHtml(e) + '</option>'; }).join("");
-      var preferredYear = 2025; // FY26 — default financial year for this report
-      var defaultYear = fyYears.indexOf(preferredYear) !== -1 ? preferredYear : fyStartYear(latestRevenueMonth());
-      fySel.value = fyYears.indexOf(defaultYear) !== -1 ? String(defaultYear) : String(fyYears[fyYears.length - 1]);
-      opcoSel.value = "All";
-      document.querySelector(".header-filters").classList.remove("hidden");
-      fySel.addEventListener("change", render);
-      opcoSel.addEventListener("change", render);
-    }
-
-    function currentOpco() { return document.getElementById("opco-select").value; }
-    function isAllFY() { return document.getElementById("fy-select").value === "all"; }
-    function effectiveFYStartYear() {
-      var v = document.getElementById("fy-select").value;
-      return v === "all" ? fyStartYear(latestRevenueMonth()) : Number(v);
-    }
-
-    function monthsElapsedInFY(startYear, latestMonth) {
-      var fyStart = new Date(startYear, 6, 1);
-      var fyEnd = new Date(startYear + 1, 5, 1);
-      if (latestMonth < fyStart) return 0;
-      var capped = latestMonth > fyEnd ? fyEnd : latestMonth;
-      return Math.round((capped.getFullYear() * 12 + capped.getMonth()) - (fyStart.getFullYear() * 12 + fyStart.getMonth())) + 1;
-    }
-
-    function sumRevenueWindow(startYear, opco, monthLimit) {
-      var months = fyMonths(startYear).slice(0, monthLimit);
-      var keys = {}; months.forEach(function (d) { keys[monthKey(d)] = true; });
-      var total = 0;
-      RAW.revenue.forEach(function (r) {
-        if (matches(r.entity, opco) && keys[monthKey(r.month)] && r.revenue != null) total += r.revenue;
-      });
-      return total;
-    }
-    function sumTargetWindow(startYear, opco, monthLimit) {
-      var months = fyMonths(startYear).slice(0, monthLimit);
-      var keys = {}; months.forEach(function (d) { keys[monthKey(d)] = true; });
-      var total = 0;
-      RAW.revenue.forEach(function (r) {
-        if (matches(r.entity, opco) && keys[monthKey(r.month)] && r.target != null) total += r.target;
-      });
-      return total;
-    }
-
-    // ---- Summary page ----
-    function renderSummaryPage(startYear, opco) {
-      var months = fyMonths(startYear);
-      var xLabels = months.map(monthLabel);
-      var latestMonth = latestRevenueMonth();
-      var elapsed = monthsElapsedInFY(startYear, latestMonth);
-
-      var revByMonth = {};
-      RAW.revenue.forEach(function (r) {
-        if (matches(r.entity, opco)) {
-          var k = monthKey(r.month);
-          if (!revByMonth[k]) revByMonth[k] = { revenue: 0, target: 0 };
-          revByMonth[k].revenue += r.revenue || 0;
-          revByMonth[k].target += r.target || 0;
-        }
-      });
-      var revValues = months.map(function (d) { var e = revByMonth[monthKey(d)]; return e ? e.revenue : null; });
-      var targetValues = months.map(function (d) { var e = revByMonth[monthKey(d)]; return e ? e.target : null; });
-
-      var fyKeys = {}; months.forEach(function (d) { fyKeys[monthKey(d)] = true; });
-      var industryTotals = aggregateBy(
-        RAW.projects.filter(function (r) { return matches(r.entity, opco) && fyKeys[monthKey(r.month)]; }),
-        function (r) { return r.industry; }, function (r) { return r.revenue; }
-      );
-      var industryItems = topN(industryTotals, 10);
-
-      var fyStartDate = new Date(startYear, 6, 1);
-      var dealsInScope = RAW.deals.filter(function (d) { return matches(d.entity, opco); });
-
-      var pipelineByMonth = {};
-      dealsInScope.forEach(function (d) {
-        if (d.bucket === "open" && d.closeDate >= fyStartDate) {
-          var k = monthKey(d.closeDate);
-          pipelineByMonth[k] = (pipelineByMonth[k] || 0) + d.amount;
-        }
-      });
-      var pipelineMonths = Object.keys(pipelineByMonth).map(Number).sort(function (a, b) { return a - b; });
-      var pipelineLabels = pipelineMonths.map(function (k) { return monthLabel(new Date(Math.floor(k / 12), k % 12, 1)); });
-      var pipelineValues = pipelineMonths.map(function (k) { return pipelineByMonth[k]; });
-
-      var intakeByMonth = {};
-      dealsInScope.forEach(function (d) {
-        if (d.bucket === "won" && fyKeys[monthKey(d.closeDate)]) {
-          var k = monthKey(d.closeDate);
-          intakeByMonth[k] = (intakeByMonth[k] || 0) + d.amount;
-        }
-      });
-      var intakeValues = months.map(function (d) { return intakeByMonth[monthKey(d)] || 0; });
-
-      var ytdStart = fyStartDate;
-      var ytdEnd = new Date(startYear, 6 + elapsed - 1, 1);
-      var wonYTD = dealsInScope.filter(function (d) {
-        return d.bucket === "won" && d.closeDate >= ytdStart && d.closeDate <= ytdEnd;
-      });
-      var totalWonYTD = wonYTD.reduce(function (s, d) { return s + d.amount; }, 0);
-      var engagementCountYTD = wonYTD.length;
-      var avgWonDealSizeYTD = wonYTD.length ? totalWonYTD / wonYTD.length : 0;
-
-      var firstWinByCompany = {};
-      dealsInScope.forEach(function (d) {
-        if (d.bucket === "won") {
-          if (!firstWinByCompany[d.company] || d.closeDate < firstWinByCompany[d.company]) {
-            firstWinByCompany[d.company] = d.closeDate;
-          }
-        }
-      });
-      var newClientCompanies = {};
-      wonYTD.forEach(function (d) {
-        var first = firstWinByCompany[d.company];
-        if (first && first >= ytdStart && first <= ytdEnd) newClientCompanies[d.company] = true;
-      });
-      var newClientsYTD = Object.keys(newClientCompanies).length;
-
-      var totalRevenueYTD = sumRevenueWindow(startYear, opco, elapsed);
-      var totalRevenueLYYTD = sumRevenueWindow(startYear - 1, opco, elapsed);
-      var revenueGrowthPct = totalRevenueLYYTD ? ((totalRevenueYTD - totalRevenueLYYTD) / totalRevenueLYYTD) * 100 : null;
-
-      var kpiHtml =
-        kpiCard("Total Revenue YTD", fmtMoneyAbbrev(totalRevenueYTD), { deltaPct: revenueGrowthPct, primary: true }) +
-        kpiCard("Engagement Count YTD", fmtInt(engagementCountYTD)) +
-        kpiCard("New Clients YTD", fmtInt(newClientsYTD)) +
-        kpiCard("Avg. Won Deal Size YTD", fmtMoneyAbbrev(avgWonDealSizeYTD)) +
-        kpiCard("Revenue Growth YTD", revenueGrowthPct == null ? "—" : Math.round(revenueGrowthPct) + "%");
-
-      var revenuePanel =
-        '<div class="panel"><div class="panel-header">Revenue vs. Target by Month<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        renderBarWithTarget(revValues, targetValues, xLabels, { yFmt: fmtMoneyAbbrev, barColor: "#244744", targetColor: "#14201c" }) +
-        '<div class="legend">' +
-        '<span class="legend-item"><span class="legend-swatch" style="background:#bfe0cd"></span>Revenue</span>' +
-        '<span class="legend-item"><span class="legend-dash" style="background:#14201c"></span>Revenue Target</span>' +
-        "</div></div></div>";
-
-      var pipelinePanel =
-        '<div class="panel"><div class="panel-header">Deals in Pipeline<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        '<div class="panel-note">*Includes all open deals from the current FY onwards.</div>' +
-        (pipelineMonths.length
-          ? renderBarChart(pipelineValues, pipelineLabels, { yFmt: fmtMoneyAbbrev, barColor: "#cadacb" })
-          : '<div class="panel-note">No open pipeline in scope.</div>') +
-        "</div></div>";
-
-      var industryPanel =
-        '<div class="panel"><div class="panel-header">Client Industry by Total Revenue<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        (industryItems.length ? renderHBarChart(industryItems, { barColor: "#244744" }) : '<div class="panel-note">No data in scope.</div>') +
-        "</div></div>";
-
-      var intakePanel =
-        '<div class="panel"><div class="panel-header">Sales Intake by Month<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        renderBarChart(intakeValues, xLabels, { yFmt: fmtMoneyAbbrev, barColor: "#cadacb" }) +
-        "</div></div>";
-
-      document.getElementById("page-summary").innerHTML =
-        '<div class="summary-grid"><div class="kpi-sidebar">' + kpiHtml + "</div>" +
-        '<div class="panels-grid">' + revenuePanel + pipelinePanel + industryPanel + intakePanel + "</div></div>";
-    }
-
-    // ---- Client Overview page ----
-    function computeClientFirstMonth(opco) {
-      var first = {};
-      RAW.projects.forEach(function (r) {
-        if (!matches(r.entity, opco) || r.revenue <= 0 || !r.client) return;
-        if (!first[r.client] || r.month < first[r.client]) first[r.client] = r.month;
-      });
-      return first;
-    }
-
-    function renderClientsPage(startYear, opco, allFY) {
-      var trendMonths, monthsSet;
-      if (allFY) {
-        trendMonths = monthsRangeFromData(RAW.projects, opco);
-        monthsSet = null;
-      } else {
-        trendMonths = fyMonths(startYear);
-        monthsSet = {}; trendMonths.forEach(function (d) { monthsSet[monthKey(d)] = true; });
-      }
-
-      var firstMonthMap = computeClientFirstMonth(opco);
-      var scopedRows = RAW.projects.filter(function (r) { return inScope(r, monthsSet, opco) && r.revenue > 0; });
-
-      var activeSet = {};
-      scopedRows.forEach(function (r) { activeSet[r.client] = true; });
-      var activeClients = Object.keys(activeSet).length;
-      var totalRevenueScope = scopedRows.reduce(function (s, r) { return s + r.revenue; }, 0);
-
-      var newSet = {};
-      Object.keys(firstMonthMap).forEach(function (c) {
-        var m = firstMonthMap[c];
-        if (monthsSet === null || monthsSet[monthKey(m)]) newSet[c] = true;
-      });
-      var newClients = Object.keys(newSet).length;
-      var newClientsRevenue = scopedRows.filter(function (r) { return newSet[r.client]; }).reduce(function (s, r) { return s + r.revenue; }, 0);
-      var avgRevenueActive = activeClients ? totalRevenueScope / activeClients : 0;
-      var avgRevenueNew = newClients ? newClientsRevenue / newClients : 0;
-
-      var byClient = aggregateBy(scopedRows, function (r) { return r.client; }, function (r) { return r.revenue; });
-      var topClients = topN(byClient, 10);
-      var top5Sum = topClients.slice(0, 5).reduce(function (s, it) { return s + it.value; }, 0);
-      var top5ConcentrationPct = totalRevenueScope ? (top5Sum / totalRevenueScope * 100) : 0;
-
-      var newClientsByMonth = {};
-      Object.keys(firstMonthMap).forEach(function (c) {
-        var k = monthKey(firstMonthMap[c]);
-        newClientsByMonth[k] = (newClientsByMonth[k] || 0) + 1;
-      });
-      var trendLabels = trendMonths.map(monthLabel);
-      var trendValues = trendMonths.map(function (d) { return newClientsByMonth[monthKey(d)] || 0; });
-
-      var comboCard =
-        '<div class="kpi-card kpi-card--combo">' +
-        '<div class="combo-item"><div class="label">Active Clients</div><div class="value">' + fmtInt(activeClients) + '</div></div>' +
-        '<div class="combo-divider"></div>' +
-        '<div class="combo-item"><div class="label">New Clients</div><div class="value">' + fmtInt(newClients) + '</div></div>' +
-        "</div>";
-
-      var kpiHtml = comboCard +
-        kpiCard("Avg. Revenue - Active Clients", fmtMoneyAbbrev(avgRevenueActive)) +
-        kpiCard("Avg. Revenue - New Clients", fmtMoneyAbbrev(avgRevenueNew)) +
-        kpiCard("Top 5 Clients Concentration", Math.round(top5ConcentrationPct) + "%");
-
-      var trendPanel =
-        '<div class="panel"><div class="panel-header">New Clients by Month<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        '<div class="panel-note">*Based on date of first revenue</div>' +
-        (trendValues.length ? renderBarChart(trendValues, trendLabels, { barColor: "#244744" }) : '<div class="panel-note">No data in scope.</div>') +
-        "</div></div>";
-
-      var clientsPanel =
-        '<div class="panel"><div class="panel-header">Top 10 Clients by Total Revenue<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        (topClients.length ? renderHBarChart(topClients, { valueFmt: fmtMoneyAbbrev }) : '<div class="panel-note">No data in scope.</div>') +
-        "</div></div>";
-
-      document.getElementById("page-clients").innerHTML =
-        '<div class="kpi-row">' + kpiHtml + "</div>" +
-        '<div class="client-panels">' + trendPanel + clientsPanel + "</div>";
-    }
-
-    // ---- Revenue Overview page ----
-    function renderRevenuePage(startYear, opco) {
-      var months = fyMonths(startYear);
-      var xLabels = months.map(monthLabel);
-      var elapsed = monthsElapsedInFY(startYear, latestRevenueMonth());
-
-      var revByMonth = {};
-      RAW.revenue.forEach(function (r) {
-        if (matches(r.entity, opco)) {
-          var k = monthKey(r.month);
-          if (!revByMonth[k]) revByMonth[k] = { revenue: 0, target: 0 };
-          revByMonth[k].revenue += r.revenue || 0;
-          revByMonth[k].target += r.target || 0;
-        }
-      });
-      var revValues = months.map(function (d) { var e = revByMonth[monthKey(d)]; return e ? e.revenue : null; });
-      var targetValues = months.map(function (d) { var e = revByMonth[monthKey(d)]; return e ? e.target : null; });
-
-      var totalRevenueYTD = sumRevenueWindow(startYear, opco, elapsed);
-      var totalRevenueLYYTD = sumRevenueWindow(startYear - 1, opco, elapsed);
-      var revenueGrowthPct = totalRevenueLYYTD ? ((totalRevenueYTD - totalRevenueLYYTD) / totalRevenueLYYTD) * 100 : null;
-      var revenueTargetYTD = sumTargetWindow(startYear, opco, elapsed);
-      var revenueTargetFY = sumTargetWindow(startYear, opco, 12);
-      var pctToTargetYTD = revenueTargetYTD ? (totalRevenueYTD / revenueTargetYTD * 100) : null;
-      var pctToTargetFY = revenueTargetFY ? (totalRevenueYTD / revenueTargetFY * 100) : null;
-
-      var fyKeys = {}; months.forEach(function (d) { fyKeys[monthKey(d)] = true; });
-      var streamTotals = aggregateBy(
-        RAW.projects.filter(function (r) { return matches(r.entity, opco) && fyKeys[monthKey(r.month)]; }),
-        function (r) { return r.stream; }, function (r) { return r.revenue; }
-      );
-      var streamItems = Object.keys(streamTotals).map(function (k) { return { label: k, value: streamTotals[k] }; })
-        .sort(function (a, b) { return b.value - a.value; });
-
-      var kpiHtml =
-        kpiCard("Total Revenue YTD", fmtMoneyAbbrev(totalRevenueYTD)) +
-        kpiCard("Revenue Target YTD", fmtMoneyAbbrev(revenueTargetYTD), { subText: pctToTargetYTD != null ? pctToTargetYTD.toFixed(1) + "% to Target" : null }) +
-        kpiCard("Revenue Target FY", fmtMoneyAbbrev(revenueTargetFY), { subText: pctToTargetFY != null ? pctToTargetFY.toFixed(1) + "% to Target" : null }) +
-        kpiCard("Yearly Revenue Growth", revenueGrowthPct == null ? "—" : Math.round(revenueGrowthPct) + "%");
-
-      var revenuePanel =
-        '<div class="panel"><div class="panel-header">Total Revenue by Month<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        renderBarWithTarget(revValues, targetValues, xLabels, { yFmt: fmtMoneyAbbrev, barColor: "#244744", targetColor: "#bfe0cd" }) +
-        '<div class="legend">' +
-        '<span class="legend-item"><span class="legend-swatch" style="background:#14201c"></span>Total Revenue</span>' +
-        '<span class="legend-item"><span class="legend-dash" style="background:#bfe0cd"></span>Revenue Target</span>' +
-        "</div></div></div>";
-
-      var streamPanel =
-        '<div class="panel"><div class="panel-header">Total Revenue by Project Stream<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        (streamItems.length ? renderPieChart(streamItems, PIE_COLORS) : '<div class="panel-note">No data in scope.</div>') +
-        "</div></div>";
-
-      document.getElementById("page-revenue").innerHTML =
-        '<div class="kpi-row">' + kpiHtml + "</div>" +
-        '<div class="panels-grid">' + revenuePanel + streamPanel + "</div>";
-    }
-
-    // ---- Deals Overview page ----
-    // No Financial Year selector in the reference report — its KPIs are inherently
-    // "current quarter" snapshots, so this ignores the shared FY dropdown and uses
-    // the real current date instead. Only OpCo applies.
-    function renderDealsPage(opco) {
-      var today = new Date();
-      var cur = fyQuarterInfo(today);
-      var prev = prevQuarter(cur.startYear, cur.q);
-      var curRange = fyQuarterRange(cur.startYear, cur.q);
-      var prevRange = fyQuarterRange(prev.startYear, prev.q);
-      var fyStartDate = new Date(cur.startYear, 6, 1);
-
-      var dealsInScope = RAW.deals.filter(function (d) { return matches(d.entity, opco); });
-      function wonIn(range) { return dealsInScope.filter(function (d) { return d.bucket === "won" && d.closeDate >= range.start && d.closeDate <= range.end; }); }
-      function lostIn(range) { return dealsInScope.filter(function (d) { return d.bucket === "lost" && d.closeDate >= range.start && d.closeDate <= range.end; }); }
-
-      var wonCur = wonIn(curRange), wonPrev = wonIn(prevRange);
-      var lostCur = lostIn(curRange), lostPrev = lostIn(prevRange);
-
-      var wonAmountCur = wonCur.reduce(function (s, d) { return s + d.amount; }, 0);
-      var wonAmountPrev = wonPrev.reduce(function (s, d) { return s + d.amount; }, 0);
-      var wonAmountDeltaPct = wonAmountPrev ? ((wonAmountCur - wonAmountPrev) / wonAmountPrev) * 100 : null;
-
-      var convCur = (wonCur.length + lostCur.length) ? (wonCur.length / (wonCur.length + lostCur.length)) * 100 : null;
-      var convPrev = (wonPrev.length + lostPrev.length) ? (wonPrev.length / (wonPrev.length + lostPrev.length)) * 100 : null;
-      var convDeltaPP = (convCur != null && convPrev != null) ? (convCur - convPrev) : null;
-
-      var avgDealCur = wonCur.length ? wonAmountCur / wonCur.length : 0;
-      var avgDealPrev = wonPrev.length ? wonAmountPrev / wonPrev.length : 0;
-      var avgDealDeltaPct = avgDealPrev ? ((avgDealCur - avgDealPrev) / avgDealPrev) * 100 : null;
-
-      var openDeals = dealsInScope.filter(function (d) { return d.bucket === "open" && d.closeDate >= fyStartDate; });
-      var openPipeline = openDeals.reduce(function (s, d) { return s + d.amount; }, 0);
-
-      var kpiHtml =
-        kpiCard("Won Amount - Current FQ", fmtMoneyAbbrev(wonAmountCur), { deltaPct: wonAmountDeltaPct }) +
-        kpiCard("Conversion Rate - Current FQ", convCur == null ? "—" : Math.round(convCur) + "%",
-          { subText: convDeltaPP != null ? (convDeltaPP >= 0 ? "+" : "") + convDeltaPP.toFixed(1) + " pp vs Prev Q" : null }) +
-        kpiCard("Avg. Deal Size Won - Current FQ", fmtMoneyAbbrev(avgDealCur), { deltaPct: avgDealDeltaPct }) +
-        kpiCard("Open Pipeline", fmtMoneyAbbrev(openPipeline));
-
-      var stageAll = dealsInScope.filter(function (d) { return d.closeDate >= fyStartDate; });
-      var stageLabelMap = { won: "Closed Won", lost: "Closed Lost", open: "Open/In Progress" };
-      var stageColorMap = { "Closed Won": PIE_COLORS[0], "Closed Lost": PIE_COLORS[3], "Open/In Progress": PIE_COLORS[2] };
-      var stageTotals = aggregateBy(stageAll, function (d) { return stageLabelMap[d.bucket]; }, function (d) { return d.amount; });
-      var stageItems = ["Closed Won", "Closed Lost", "Open/In Progress"].filter(function (k) { return stageTotals[k] != null; })
-        .map(function (k) { return { label: k, value: stageTotals[k] }; });
-      var stageColors = stageItems.map(function (it) { return stageColorMap[it.label]; });
-
-      var confItems = topN(aggregateBy(openDeals, function (d) { return d.confidence; }, function (d) { return d.amount; }), 10);
-
-      var stagePanel =
-        '<div class="panel"><div class="panel-header">Deal Amount by Stage<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        '<div class="panel-note">*Includes all deals from the current FY onwards.</div>' +
-        (stageItems.length ? renderHBarChart(stageItems, { valueFmt: fmtMoneyAbbrev, colors: stageColors }) : '<div class="panel-note">No data in scope.</div>') +
-        "</div></div>";
-
-      var confPanel =
-        '<div class="panel"><div class="panel-header">Deals in Pipeline by Confidence<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        '<div class="panel-note">*Includes all deals in pipeline from the current FY onwards.</div>' +
-        (confItems.length ? renderHBarChart(confItems, { valueFmt: fmtMoneyAbbrev, colors: PIE_COLORS }) : '<div class="panel-note">No data in scope.</div>') +
-        "</div></div>";
-
-      document.getElementById("page-deals").innerHTML =
-        '<div class="kpi-row">' + kpiHtml + "</div>" +
-        '<div class="panels-grid">' + stagePanel + confPanel + "</div>";
-    }
-
-    // ---- Top Accounts Overview page ----
-    function renderTopAccountsPage(startYear, opco) {
-      var months = fyMonths(startYear);
-      var fyKeys = {}; months.forEach(function (d) { fyKeys[monthKey(d)] = true; });
-      var fyStartDate = new Date(startYear, 6, 1);
-
-      var openDeals = RAW.deals.filter(function (d) { return matches(d.entity, opco) && d.bucket === "open" && d.closeDate >= fyStartDate; });
-      var topPipelineDeals = topN(aggregateBy(openDeals, function (d) { return d.dealName; }, function (d) { return d.amount; }), 10);
-
-      var scopedProjectRows = RAW.projects.filter(function (r) { return matches(r.entity, opco) && fyKeys[monthKey(r.month)]; });
-      var topClientsByRevenue = topN(aggregateBy(scopedProjectRows, function (r) { return r.client; }, function (r) { return r.revenue; }), 10);
-
-      var projectSets = {};
-      scopedProjectRows.forEach(function (r) {
-        if (!projectSets[r.client]) projectSets[r.client] = {};
-        projectSets[r.client][r.project] = true;
-      });
-      var byClientProjects = {};
-      Object.keys(projectSets).forEach(function (c) { byClientProjects[c] = Object.keys(projectSets[c]).length; });
-      var topClientsByProjects = topN(byClientProjects, 10);
-
-      var pipelinePanel =
-        '<div class="panel"><div class="panel-header">Top 10 Deals in Pipeline<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        (topPipelineDeals.length ? renderHBarChart(topPipelineDeals, { valueFmt: fmtMoneyAbbrev, barColor: "#244744" }) : '<div class="panel-note">No data in scope.</div>') +
-        "</div></div>";
-
-      var revenuePiePanel =
-        '<div class="panel"><div class="panel-header">Top 10 Accounts by Revenue<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        (topClientsByRevenue.length ? renderPieChart(topClientsByRevenue, PIE_COLORS) : '<div class="panel-note">No data in scope.</div>') +
-        "</div></div>";
-
-      var projectsPiePanel =
-        '<div class="panel"><div class="panel-header">Top 10 Accounts by Projects<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        (topClientsByProjects.length ? renderPieChart(topClientsByProjects, PIE_COLORS, { valueFmt: fmtInt }) : '<div class="panel-note">No data in scope.</div>') +
-        "</div></div>";
-
-      document.getElementById("page-accounts").innerHTML =
-        '<div class="client-panels">' + pipelinePanel + '<div class="panel-stack">' + revenuePiePanel + projectsPiePanel + "</div></div>";
-    }
-
-    // ---- Utilisation Overview page ----
-    // Employment Type is a page-local filter (not part of the shared header bar,
-    // since it only applies here) — its selection is kept in this module-level
-    // variable so it survives the innerHTML rebuild on every re-render.
-    var UTIL_EMPLOYMENT_FILTER = "All";
-    function renderUtilisationPage(startYear, opco) {
-      var months = fyMonths(startYear);
-      var elapsed = monthsElapsedInFY(startYear, latestRevenueMonth());
-      var scopeMonths = months.slice(0, elapsed);
-      var scopeKeys = {}; scopeMonths.forEach(function (d) { scopeKeys[monthKey(d)] = true; });
-
-      var basisSet = {};
-      RAW.utilisation.forEach(function (r) { if (matches(r.entity, opco)) basisSet[r.employmentBasis] = true; });
-      var basisList = Object.keys(basisSet).sort();
-
-      var rows = RAW.utilisation.filter(function (r) {
-        return matches(r.entity, opco) && r.isBillable && scopeKeys[monthKey(r.month)] &&
-          (UTIL_EMPLOYMENT_FILTER === "All" || r.employmentBasis === UTIL_EMPLOYMENT_FILTER);
-      });
-
-      var avgUtilisation = rows.length ? rows.reduce(function (s, r) { return s + (r.utilisationPct || 0); }, 0) / rows.length : 0;
-
-      var fteByMonth = {};
-      rows.forEach(function (r) { var k = monthKey(r.month); fteByMonth[k] = (fteByMonth[k] || 0) + (r.fte || 0); });
-      var monthsWithData = Object.keys(fteByMonth).length || 1;
-      var billableFTEs = Object.keys(fteByMonth).reduce(function (s, k) { return s + fteByMonth[k]; }, 0) / monthsWithData;
-
-      var rates = rows.map(function (r) { return r.dailyRate; }).filter(function (v) { return v != null && v > 0; });
-      var avgDailyRate = rates.length ? rates.reduce(function (s, v) { return s + v; }, 0) / rates.length : 0;
-
-      var totalInvoicedDays = rows.reduce(function (s, r) { return s + (r.invoicedDays || 0); }, 0);
-      var distinctUsers = {}; rows.forEach(function (r) { if (r.userId) distinctUsers[r.userId] = true; });
-      var userCount = Object.keys(distinctUsers).length;
-      var avgBilledDays = userCount ? totalInvoicedDays / userCount : 0;
-
-      var kpiHtml =
-        kpiCard("Avg. Utilisation - Current FY", avgUtilisation.toFixed(1) + "%") +
-        kpiCard("Billable FTEs", billableFTEs.toFixed(2)) +
-        kpiCard("Overall Avg. Daily Rate", fmtMoneyAbbrev(avgDailyRate)) +
-        kpiCard("Avg. Billed Days per Employee", avgBilledDays.toFixed(2));
-
-      var utilByMonth = {};
+    // ---- Ranged bar-list (paged "Top N" pattern) ----
+    function groupSum(rows, keyField, valField) {
+      var map = {};
       rows.forEach(function (r) {
-        var k = monthKey(r.month);
-        if (!utilByMonth[k]) utilByMonth[k] = { sum: 0, n: 0 };
-        utilByMonth[k].sum += r.utilisationPct || 0;
-        utilByMonth[k].n += 1;
+        var k = r[keyField] || 'Unknown';
+        map[k] = (map[k] || 0) + (Number(r[valField]) || 0);
       });
-      var xLabels = months.map(monthLabel);
-      var utilValues = months.map(function (d) { var e = utilByMonth[monthKey(d)]; return e ? (e.sum / e.n) : null; });
+      return Object.keys(map).map(function (k) { return { label: k, value: map[k] }; }).sort(function (a, b) { return b.value - a.value; });
+    }
+    function toValueMap(rows) {
+      var m = {}; rows.forEach(function (r) { m[r.label] = r.value; }); return m;
+    }
+    function renderBarList(items, valueFmt, cmpMap, barColor, cmpLabel, cmp2Map, cmp2Label, showMarkerLabels) {
+      var cmpVals = cmpMap ? Object.keys(cmpMap).map(function (k) { return cmpMap[k]; }) : [];
+      var cmp2Vals = cmp2Map ? Object.keys(cmp2Map).map(function (k) { return cmp2Map[k]; }) : [];
+      var max = Math.max.apply(null, items.map(function (i) { return Math.abs(i.value); }).concat(cmpVals.map(Math.abs)).concat(cmp2Vals.map(Math.abs)).concat([1]));
+      var legendParts = [];
+      if (cmpMap || cmp2Map) legendParts.push('<span class="sw"><span class="oc-sw-box" style="background:var(--oc-deep-teal);"></span>Actual</span>');
+      if (cmpMap) legendParts.push('<span class="sw"><span class="oc-sw-dash" style="border-color:var(--oc-coral);"></span>' + (cmpLabel || 'Comparison') + '</span>');
+      if (cmp2Map) legendParts.push('<span class="sw"><span class="oc-sw-dash" style="border-color:#4FC3F7;"></span>' + (cmp2Label || 'Comparison') + '</span>');
+      var legend = legendParts.length ? '<div class="oc-legend" style="margin-bottom:2px;">' + legendParts.join('') + '</div>' : '';
+      var LABEL_COLLISION_THRESHOLD_PCT = 12;
+      return legend + '<div class="oc-barlist">' + items.map(function (i) {
+        var pct = max ? (Math.abs(i.value) / max) * 100 : 0;
+        var fillStyle = i.value < 0 ? ' background:var(--oc-coral);' : (barColor ? ' background:' + barColor + ';' : '');
+        var marker = '';
+        var hasCmp = cmpMap && Object.prototype.hasOwnProperty.call(cmpMap, i.label);
+        var hasCmp2 = cmp2Map && Object.prototype.hasOwnProperty.call(cmp2Map, i.label);
+        var cmpPct = hasCmp ? (max ? Math.min(100, (Math.abs(cmpMap[i.label]) / max) * 100) : 0) : null;
+        var cmp2Pct = hasCmp2 ? (max ? Math.min(100, (Math.abs(cmp2Map[i.label]) / max) * 100) : 0) : null;
+        var needsStacking = hasCmp && hasCmp2 && Math.abs(cmpPct - cmp2Pct) < LABEL_COLLISION_THRESHOLD_PCT;
+        if (hasCmp) {
+          marker += '<div class="oc-barlist-marker" style="left:' + cmpPct.toFixed(1) + '%;" title="' + (cmpLabel || 'Comparison') + ': ' + valueFmt(cmpMap[i.label]) + '"></div>';
+          if (showMarkerLabels) marker += '<div style="position:absolute; left:' + cmpPct.toFixed(1) + '%; top:100%; transform:translate(-50%, 3px); font-size:10px; font-weight:700; color:var(--oc-coral); white-space:nowrap; pointer-events:none;">' + valueFmt(cmpMap[i.label]) + '</div>';
+        }
+        if (hasCmp2) {
+          marker += '<div class="oc-barlist-marker" style="left:' + cmp2Pct.toFixed(1) + '%; border-left-color:#4FC3F7;" title="' + (cmp2Label || 'Comparison') + ': ' + valueFmt(cmp2Map[i.label]) + '"></div>';
+          if (showMarkerLabels) { var off = needsStacking ? 14 : 3; marker += '<div style="position:absolute; left:' + cmp2Pct.toFixed(1) + '%; top:100%; transform:translate(-50%, ' + off + 'px); font-size:10px; font-weight:700; color:#4FC3F7; white-space:nowrap; pointer-events:none;">' + valueFmt(cmp2Map[i.label]) + '</div>'; }
+        }
+        return '<div class="oc-barlist-row">' +
+          '<div class="oc-barlist-head"><span class="oc-barlist-name">' + escHtml(i.label) + '</span><span class="oc-barlist-value">' + valueFmt(i.value) + '</span></div>' +
+          '<div class="oc-barlist-track"><div class="oc-barlist-fill" style="width:' + pct.toFixed(1) + '%;' + fillStyle + '"></div>' + marker + '</div></div>';
+      }).join('') + '</div>';
+    }
+    function rangeBucketsFor(totalCount, capAt) {
+      var buckets = [];
+      var effectiveCount = capAt ? Math.min(totalCount, capAt) : totalCount;
+      var upTo = Math.max(50, Math.ceil(effectiveCount / 10) * 10);
+      for (var start = 0; start < upTo; start += 10) buckets.push({ key: (start + 1) + '-' + (start + 10), start: start, end: start + 10 });
+      return buckets;
+    }
+    function rangePillsHtml(stateKey, totalCount, capAt) {
+      var current = STATE[stateKey] || '1-10';
+      return '<div class="oc-pill-toggle" data-toggle="' + stateKey + '">' + rangeBucketsFor(totalCount, capAt).map(function (b) {
+        var disabled = b.start >= totalCount;
+        return '<button class="' + (b.key === current ? 'active' : '') + '" data-value="' + b.key + '"' + (disabled ? ' disabled' : '') + '>' + b.key + '</button>';
+      }).join('') + '</div>';
+    }
+    function sliceForRange(items, stateKey, capAt) {
+      var current = STATE[stateKey] || '1-10';
+      var buckets = rangeBucketsFor(items.length, capAt);
+      var bucket = buckets.filter(function (b) { return b.key === current; })[0] || buckets[0];
+      return items.slice(bucket.start, bucket.end);
+    }
+    function renderRangedBarList(items, valueFmt, stateKey, cmpMap, cmpLabel, showMarkerLabels, capAt) {
+      var slice = sliceForRange(items, stateKey, capAt);
+      var pills = rangePillsHtml(stateKey, items.length, capAt);
+      var body = slice.length ? renderBarList(slice, valueFmt, null, null, null, cmpMap, cmpLabel, showMarkerLabels) : '<div class="oc-caption" style="padding:12px 0;">No items in this range</div>';
+      return '<div style="margin-bottom:10px;">' + pills + '</div>' + body;
+    }
 
-      // Targets are keyed by Grade + FY, not month, so this is a flat (grade-averaged)
-      // reference line rather than a true monthly target trend.
-      var fyLbl = fyLabel(startYear);
-      var targetsForFY = RAW.targetRates.filter(function (t) { return t.fy === fyLbl && t.utilisationTarget != null; });
-      var flatTarget = targetsForFY.length ? targetsForFY.reduce(function (s, t) { return s + t.utilisationTarget; }, 0) / targetsForFY.length : null;
-      var targetValues = months.map(function () { return flatTarget; });
-
-      var leaveByMonth = {};
-      RAW.utilisation.forEach(function (r) {
-        if (!matches(r.entity, opco) || (UTIL_EMPLOYMENT_FILTER !== "All" && r.employmentBasis !== UTIL_EMPLOYMENT_FILTER)) return;
-        if (!scopeKeys[monthKey(r.month)]) return;
-        var k = monthKey(r.month);
-        leaveByMonth[k] = (leaveByMonth[k] || 0) + (r.leaveDays || 0);
-      });
-      var leaveValues = months.map(function (d) { return leaveByMonth[monthKey(d)] || 0; });
-
-      var filterHtml =
-        '<div class="page-filter"><label>Employment Type</label><select id="util-employment-select">' +
-        '<option value="All"' + (UTIL_EMPLOYMENT_FILTER === "All" ? " selected" : "") + '>All</option>' +
-        basisList.map(function (b) { return '<option value="' + escapeHtml(b) + '"' + (UTIL_EMPLOYMENT_FILTER === b ? " selected" : "") + '>' + escapeHtml(b) + '</option>'; }).join("") +
-        "</select></div>";
-
-      var utilPanel =
-        '<div class="panel"><div class="panel-header">Billable Utilisation by Month<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        renderBarWithTarget(utilValues, targetValues, xLabels, {
-          yFmt: function (v) { return Math.round(v) + "%"; }, barColor: "#244744", targetColor: "#bfe0cd",
-          seriesLabel: "Utilisation", targetLabel: "Utilisation Target",
-        }) +
-        '<div class="legend">' +
-        '<span class="legend-item"><span class="legend-swatch" style="background:#14201c"></span>Billable Utilisation</span>' +
-        (flatTarget != null ? '<span class="legend-item"><span class="legend-dash" style="background:#bfe0cd"></span>Utilisation Target (avg across grades)</span>' : "") +
-        "</div></div></div>";
-
-      var leavePanel =
-        '<div class="panel"><div class="panel-header">Leave Days by Month<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        renderLineChart(leaveValues, xLabels, { lineColor: "#244744" }) +
-        "</div></div>";
-
-      document.getElementById("page-utilisation").innerHTML =
-        filterHtml + '<div class="kpi-row">' + kpiHtml + "</div>" +
-        '<div class="panels-grid">' + utilPanel + leavePanel + "</div>";
-
-      var sel = document.getElementById("util-employment-select");
-      sel.addEventListener("change", function () {
-        UTIL_EMPLOYMENT_FILTER = sel.value;
-        renderUtilisationPage(effectiveFYStartYear(), currentOpco());
+    // ---- Segmented pill toggle ----
+    function renderPillToggle(options, stateKey) {
+      var current = STATE[stateKey];
+      return '<div class="oc-pill-toggle" data-toggle="' + stateKey + '">' + options.map(function (o) {
+        return '<button class="' + (o.key === current ? 'active' : '') + '"' + (o.disabled ? ' disabled style="opacity:0.4; cursor:not-allowed;" title="No data available"' : '') + ' data-value="' + o.key + '">' + o.label + '</button>';
+      }).join('') + '</div>';
+    }
+    function wirePillToggles(container) {
+      Array.prototype.forEach.call(container.querySelectorAll('.oc-pill-toggle'), function (group) {
+        var stateKey = group.getAttribute('data-toggle');
+        Array.prototype.forEach.call(group.querySelectorAll('button'), function (btn) {
+          if (btn.disabled) return;
+          btn.addEventListener('click', function () { STATE[stateKey] = btn.getAttribute('data-value'); renderPage(); });
+        });
       });
     }
 
-    // ---- Microsoft Certifications page ----
-    // data_certifications has no OpCo/entity column, so this page ignores the
-    // shared header filters entirely — there's nothing to filter it by.
-    function renderCertificationsPage() {
-      var today = new Date();
-      var activeCerts = RAW.certifications.filter(function (c) { return !c.expirationDate || c.expirationDate >= today; });
-
-      var typeSet = {}; activeCerts.forEach(function (c) { typeSet[c.title] = true; });
-      var activeTypes = Object.keys(typeSet).length;
-
-      var userSet = {}; activeCerts.forEach(function (c) { if (c.userId) userSet[c.userId] = true; });
-      var activeEmployees = Object.keys(userSet).length;
-
-      var byTitle = {};
-      activeCerts.forEach(function (c) {
-        if (!byTitle[c.title]) byTitle[c.title] = {};
-        if (c.userId) byTitle[c.title][c.userId] = true;
-      });
-      var titleItems = Object.keys(byTitle).map(function (t) { return { label: t, value: Object.keys(byTitle[t]).length }; })
-        .sort(function (a, b) { return b.value - a.value; }).slice(0, 15);
-
-      var completionMonths = monthsRangeSimple(RAW.certifications.map(function (c) { return c.completionDate; }).filter(Boolean));
-      var completedByMonth = {};
-      RAW.certifications.forEach(function (c) { if (c.completionDate) { var k = monthKey(c.completionDate); completedByMonth[k] = (completedByMonth[k] || 0) + 1; } });
-      var completedLabels = completionMonths.map(monthLabel);
-      var completedValues = completionMonths.map(function (d) { return completedByMonth[monthKey(d)] || 0; });
-
-      var expiryMonths = monthsRangeSimple(RAW.certifications.map(function (c) { return c.expirationDate; }).filter(Boolean));
-      var expiringByMonth = {};
-      RAW.certifications.forEach(function (c) { if (c.expirationDate) { var k = monthKey(c.expirationDate); expiringByMonth[k] = (expiringByMonth[k] || 0) + 1; } });
-      var expiryLabels = expiryMonths.map(monthLabel);
-      var expiryValues = expiryMonths.map(function (d) { return expiringByMonth[monthKey(d)] || 0; });
-
-      var kpiHtml =
-        kpiCard("Active Certification Types", fmtInt(activeTypes)) +
-        kpiCard("Active Certified Employees", fmtInt(activeEmployees));
-
-      var typesPanel =
-        '<div class="panel"><div class="panel-header">Active Certification by Types<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        (titleItems.length ? renderHBarChart(titleItems, { valueFmt: fmtInt, barColor: "#244744" }) : '<div class="panel-note">No data in scope.</div>') +
-        "</div></div>";
-
-      var completedPanel =
-        '<div class="panel"><div class="panel-header">Certifications Completed by Month<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        (completedValues.length ? renderBarChart(completedValues, completedLabels, { barColor: "#244744", yFmt: function (v) { return Math.round(v); } }) : '<div class="panel-note">No data in scope.</div>') +
-        "</div></div>";
-
-      var expiringPanel =
-        '<div class="panel"><div class="panel-header">Expiring Certifications by Month<span class="chevron">▾</span></div>' +
-        '<div class="panel-body">' +
-        (expiryValues.length ? renderBarChart(expiryValues, expiryLabels, { barColor: "#cadacb", yFmt: function (v) { return Math.round(v); } }) : '<div class="panel-note">No data in scope.</div>') +
-        "</div></div>";
-
-      document.getElementById("page-certifications").innerHTML =
-        '<div class="kpi-row">' + kpiHtml + "</div>" +
-        '<div class="client-panels"><div class="panel-stack">' + typesPanel + "</div><div class=\"panel-stack\">" + completedPanel + expiringPanel + "</div></div>";
+    // ---- Stacked bar chart ----
+    var STACK_COLORS = ['var(--oc-deep-teal)', 'var(--oc-mid-teal)', 'var(--oc-coral)', 'var(--oc-mint-deep)', '#7a8f8f', '#a8b8b8', '#c9c9c9'];
+    function renderStackedBarChart(title, months, series, valueFmt, showSegmentLabels, heightPx) {
+      valueFmt = valueFmt || fmtCurrency;
+      heightPx = heightPx || 140;
+      var totals = months.map(function (m, i) { return series.reduce(function (s, ser) { return s + (ser.values[i] || 0); }, 0); });
+      var maxTotal = Math.max.apply(null, totals.concat([1]));
+      var sizes = chartLabelSizes(months.length);
+      var barsHtml = months.map(function (m, i) {
+        var total = totals[i];
+        var heightPct = maxTotal ? (total / maxTotal) * 100 : 0;
+        var segsHtml = series.map(function (ser) {
+          var v = ser.values[i] || 0; if (!v) return '';
+          var segPct = total ? (v / total) * 100 : 0;
+          var segPxHeight = heightPx * (heightPct / 100) * (segPct / 100);
+          var label = (showSegmentLabels && segPxHeight >= 13) ? '<span style="font-size:9px; font-weight:700; color:#fff; text-shadow:0 1px 1px rgba(0,0,0,0.25);">' + valueFmt(v) + '</span>' : '';
+          return '<div style="width:100%; height:' + segPct.toFixed(1) + '%; background:' + ser.color + '; display:flex; align-items:center; justify-content:center; overflow:hidden;" title="' + ser.label + ': ' + valueFmt(v) + '">' + label + '</div>';
+        }).join('');
+        return '<div style="flex:1 1 0; min-width:0; display:flex; flex-direction:column; align-items:center; gap:5px;">' +
+          '<div style="font-size:' + sizes.value + 'px; font-weight:700;">' + valueFmt(total) + '</div>' +
+          '<div style="width:100%; max-width:34px; height:' + heightPx + 'px; display:flex; flex-direction:column-reverse; border-radius:4px 4px 0 0; overflow:hidden;">' +
+            '<div style="width:100%; height:' + heightPct.toFixed(1) + '%; display:flex; flex-direction:column-reverse; border-radius:4px 4px 0 0; overflow:hidden;">' + segsHtml + '</div></div>' +
+          '<div style="text-align:center;"><div style="font-size:' + sizes.month + 'px; font-weight:700; color:var(--fg2);">' + MONTH_NAMES[m.getMonth()] + '</div><div style="font-size:' + Math.max(sizes.year - 1, 7) + 'px; color:var(--fg3); opacity:0.8;">' + m.getFullYear() + '</div></div></div>';
+      }).join('');
+      var legendHtml = '<div class="oc-legend">' + series.map(function (ser) { return '<span class="sw"><span class="oc-sw-box" style="background:' + ser.color + ';"></span>' + ser.label + '</span>'; }).join('') + '</div>';
+      return '<div><div class="oc-multiple-label" style="margin-bottom:8px;">' + title + '</div>' + legendHtml +
+        '<div style="display:flex; align-items:flex-end; justify-content:center; gap:6px; padding-top:6px;">' + barsHtml + '</div></div>';
     }
 
-    function render() {
-      var opco = currentOpco();
-      var startYear = effectiveFYStartYear();
-      var allFY = isAllFY();
-      renderSummaryPage(startYear, opco);
-      renderClientsPage(startYear, opco, allFY);
-      renderRevenuePage(startYear, opco);
-      renderDealsPage(opco);
-      renderTopAccountsPage(startYear, opco);
-      renderUtilisationPage(startYear, opco);
-      renderCertificationsPage();
-
-      var earliestMonth = RAW.revenue.reduce(function (min, r) { return (!min || r.month < min) ? r.month : min; }, null);
-      var latestMonth = latestRevenueMonth();
-      document.getElementById("footnote").textContent = earliestMonth
-        ? "Note: Data is available from " + monthLabel(earliestMonth) + " until the latest completed month (" + monthLabel(latestMonth) + ")."
-        : "";
+    // ---- Donut / pie charts (pure CSS conic-gradient) ----
+    var DONUT_COLORS = ['var(--oc-deep-teal)', 'var(--oc-mid-teal)', 'var(--oc-coral)', 'var(--oc-mint-deep)', '#7a8f8f', '#a8b8b8'];
+    function renderDonutChart(rows, valueFmt, centerLabel, cmpMap, cmpLabel) {
+      var total = rows.reduce(function (s, r) { return s + r.value; }, 0);
+      var acc = 0;
+      var stops = rows.map(function (r, i) {
+        var startPct = total ? (acc / total) * 100 : 0; acc += r.value;
+        var endPct = total ? (acc / total) * 100 : 0;
+        return DONUT_COLORS[i % DONUT_COLORS.length] + ' ' + startPct.toFixed(1) + '% ' + endPct.toFixed(1) + '%';
+      });
+      var gradient = stops.length ? 'conic-gradient(' + stops.join(', ') + ')' : 'var(--bg-muted)';
+      var cols = cmpMap ? '1.4fr 0.9fr 0.6fr 0.9fr' : '1.6fr 0.8fr 0.6fr';
+      var rowsHtml = rows.map(function (r, i) {
+        var pct = total ? (r.value / total) * 100 : 0;
+        var cmpHtml = '';
+        if (cmpMap) {
+          var cmpVal = cmpMap[r.label];
+          var deltaPct = cmpVal ? ((r.value - cmpVal) / cmpVal) * 100 : null;
+          cmpHtml = '<div>' + (deltaPct != null ? '<span class="oc-badge ' + (deltaPct > 0 ? 'up' : deltaPct < 0 ? 'down' : 'neutral') + '">' + fmtDelta(deltaPct) + '</span>' : '<span class="oc-caption">—</span>') + '</div>';
+        }
+        return '<div style="display:grid; grid-template-columns:' + cols + '; gap:8px; padding:11px 10px; border-bottom:1px solid var(--rule); align-items:center;">' +
+          '<div style="font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px;"><span style="width:10px; height:10px; border-radius:50%; background:' + DONUT_COLORS[i % DONUT_COLORS.length] + '; display:inline-block; flex-shrink:0;"></span>' + escHtml(r.label) + '</div>' +
+          '<div style="font-size:13.5px; font-weight:700;">' + valueFmt(r.value) + '</div>' +
+          '<div style="font-size:12.5px; color:var(--fg3);">' + pct.toFixed(0) + '%</div>' + cmpHtml + '</div>';
+      }).join('');
+      return '<div style="display:grid; grid-template-columns:200px 1fr; gap:28px; align-items:center;">' +
+        '<div style="position:relative; width:160px; height:160px; margin:0 auto;">' +
+          '<div style="width:160px; height:160px; border-radius:50%; background:' + gradient + ';"></div>' +
+          '<div style="position:absolute; top:32px; left:32px; width:96px; height:96px; border-radius:50%; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center;">' +
+            '<div style="font-size:11px; color:var(--fg3); font-weight:600;">' + (centerLabel || 'TOTAL') + '</div><div style="font-size:15px; font-weight:800;">' + valueFmt(total) + '</div></div></div>' +
+        '<div><div style="display:grid; grid-template-columns:' + cols + '; gap:8px; padding:0 10px 8px; font-size:11px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:var(--fg3); border-bottom:1px solid var(--rule);"><div></div><div>Count</div><div>%</div>' + (cmpMap ? '<div>' + cmpLabel + '</div>' : '') + '</div>' + rowsHtml + '</div></div>';
+    }
+    function renderAlliancePieChart(rows, totalAllOpportunities, centerLabel, pieColLabel) {
+      var pieTotal = rows.reduce(function (s, r) { return s + r.value; }, 0);
+      var acc = 0;
+      var stops = rows.map(function (r, i) {
+        var startPct = pieTotal ? (acc / pieTotal) * 100 : 0; acc += r.value;
+        var endPct = pieTotal ? (acc / pieTotal) * 100 : 0;
+        return DONUT_COLORS[i % DONUT_COLORS.length] + ' ' + startPct.toFixed(1) + '% ' + endPct.toFixed(1) + '%';
+      });
+      var gradient = stops.length ? 'conic-gradient(' + stops.join(', ') + ')' : 'var(--bg-muted)';
+      var cols = '1.4fr 0.8fr 0.9fr 0.9fr';
+      var rowsHtml = rows.map(function (r, i) {
+        var pctOfAll = totalAllOpportunities ? (r.value / totalAllOpportunities) * 100 : null;
+        var pctOfPie = pieTotal ? (r.value / pieTotal) * 100 : 0;
+        return '<div style="display:grid; grid-template-columns:' + cols + '; gap:8px; padding:11px 10px; border-bottom:1px solid var(--rule); align-items:center;">' +
+          '<div style="font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px;"><span style="width:10px; height:10px; border-radius:50%; background:' + DONUT_COLORS[i % DONUT_COLORS.length] + '; display:inline-block; flex-shrink:0;"></span>' + escHtml(r.label) + '</div>' +
+          '<div style="font-size:13.5px; font-weight:700;">' + r.value + (r.value === 1 ? ' opportunity' : ' opportunities') + '</div>' +
+          '<div style="font-size:12.5px; color:var(--fg3);">' + (pctOfAll != null ? pctOfAll.toFixed(1) + '%' : '—') + '</div>' +
+          '<div style="font-size:12.5px; color:var(--fg3);">' + pctOfPie.toFixed(1) + '%</div></div>';
+      }).join('');
+      return '<div style="display:grid; grid-template-columns:200px 1fr; gap:28px; align-items:center;">' +
+        '<div style="position:relative; width:160px; height:160px; margin:0 auto;">' +
+          '<div style="width:160px; height:160px; border-radius:50%; background:' + gradient + ';"></div>' +
+          '<div style="position:absolute; top:32px; left:32px; width:96px; height:96px; border-radius:50%; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">' +
+            '<div style="font-size:11px; color:var(--fg3); font-weight:600;">' + (centerLabel || 'TOTAL') + '</div><div style="font-size:15px; font-weight:800;">' + pieTotal + '</div></div></div>' +
+        '<div><div style="display:grid; grid-template-columns:' + cols + '; gap:8px; padding:0 10px 8px; font-size:11px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:var(--fg3); border-bottom:1px solid var(--rule);"><div></div><div>Count</div><div>% of all opportunities</div><div>' + (pieColLabel || '% of pie') + '</div></div>' + rowsHtml + '</div></div>';
     }
 
-    document.querySelectorAll(".tab-btn").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        document.querySelectorAll(".tab-btn").forEach(function (b) { b.classList.remove("active"); });
-        btn.classList.add("active");
-        document.querySelectorAll(".page").forEach(function (p) { p.classList.remove("active"); });
-        document.getElementById("page-" + btn.dataset.page).classList.add("active");
+    // ---- Panel header / not-ready panel ----
+    function panelHeadWithTools(title, key) { return panelHeadWithToolsAndExtra(title, key, ''); }
+    function panelHeadWithToolsAndExtra(title, key, extraHtml) {
+      return '<div class="oc-panel-head"><h3 class="oc-panel-title">' + title + '</h3>' +
+        '<div style="display:flex; align-items:center; gap:8px;"><button class="oc-icon-btn" data-download="' + key + '" title="Download data">&#8595;</button></div></div>' +
+        (extraHtml ? '<div style="margin-top:14px; margin-bottom:8px;">' + extraHtml + '</div>' : '');
+    }
+    function renderNotReadyPanel(title, reason) {
+      return '<section class="oc-panel"><h3 class="oc-panel-title">' + title + '</h3>' +
+        '<div class="oc-not-ready"><span class="oc-not-ready-tag">Not available yet</span>' + reason + '</div></section>';
+    }
+    function renderPlaceholderPage(label) {
+      return '<div class="oc-panel"><div class="oc-empty-panel">' + label + ' — coming soon.</div></div>';
+    }
+
+    // ---- CSV download registry ----
+    var CURRENT_DOWNLOADS = {};
+    function registerDownload(key, filename, header, rows) { CURRENT_DOWNLOADS[key] = { filename: filename, header: header, rows: rows }; }
+    function downloadCsv(filename, header, rows) {
+      var all = [header].concat(rows);
+      var csv = all.map(function (r) { return r.map(function (v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; }).join(','); }).join('\n');
+      var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+    function wireDownloadButtons(container) {
+      Array.prototype.forEach.call(container.querySelectorAll('[data-download]'), function (btn) {
+        btn.addEventListener('click', function () {
+          var d = CURRENT_DOWNLOADS[btn.getAttribute('data-download')];
+          if (d) downloadCsv(d.filename, d.header, d.rows);
+        });
       });
-    });
+    }
+    function fileSlug() {
+      var b = periodBounds();
+      var monthPart = b ? monthKey(b.end) : monthKey(new Date());
+      return STATE.entity.replace(/\s+/g, '-').toLowerCase() + '-' + monthPart;
+    }
+
+    // ---- Page dispatch (Phase 2 will replace each placeholder with a real
+    // ported render*Page function, one nav item at a time) ----
+    function renderPage() {
+      var el = document.getElementById('oc-content');
+      CURRENT_DOWNLOADS = {};
+      var navItem = NAV_ITEMS.filter(function (n) { return n.key === STATE.page; })[0];
+      el.innerHTML = renderPlaceholderPage(navItem ? navItem.label : STATE.page);
+      wirePillToggles(el);
+      wireDownloadButtons(el);
+    }
+
+    function uniqueEntities(data) {
+      var set = {};
+      (data.revenueTarget || []).forEach(function (r) { if (r.entity) set[r.entity] = true; });
+      (data.unifiedFact || []).forEach(function (r) { if (r.entity) set[r.entity] = true; });
+      var real = Object.keys(set).sort();
+      return real.length >= 2 ? [COMBINED_ENTITY_LABEL].concat(real) : real;
+    }
+
+    function onDataLoaded(data) {
+      RAW = data;
+      var entities = uniqueEntities(data);
+      ENTITIES = entities;
+      COMBINED_ENTITIES = entities.filter(function (e) { return e !== COMBINED_ENTITY_LABEL; });
+      STATE.entity = entities.indexOf(COMBINED_ENTITY_LABEL) !== -1 ? COMBINED_ENTITY_LABEL : entities[0];
+
+      buildMonthUniverse();
+      STATE.selectedMonths = defaultMonthSelection();
+
+      renderHeader(entities);
+      renderPage();
+
+      document.addEventListener('click', function (e) {
+        var wrap = document.getElementById('oc-period-wrap');
+        if (STATE.periodPanelOpen && wrap && !wrap.contains(e.target)) {
+          STATE.periodPanelOpen = false;
+          renderPeriodPicker();
+        }
+      });
+    }
 
     async function loadReport(token) {
-      document.getElementById("placeholder").classList.add("hidden");
-      var app = document.getElementById("app");
-      app.classList.add("visible");
-      document.getElementById("page-summary").innerHTML = '<div class="panel"><div class="panel-body">Loading data from the semantic model…</div></div>';
+      document.getElementById("oc-placeholder").style.display = "none";
+      document.getElementById("oc-loading").style.display = "block";
       var results = await executeDaxQueries(token, [
-        Q_REVENUE_TARGET, Q_PROJECT_FACT, Q_DEALS, Q_UTILISATION, Q_CERTIFICATIONS, Q_TARGET_DAILY_RATE,
+        Q_REVENUE_TARGET, Q_PROJECT_FACT, Q_DEALS, Q_UTILISATION, Q_CERTIFICATIONS,
       ]);
-      RAW.revenue = parseRevenueRows(results[0]);
-      RAW.projects = parseProjectRows(results[1]);
-      RAW.deals = parseDealRows(results[2]);
-      RAW.utilisation = parseUtilisationRows(results[3]);
-      RAW.certifications = parseCertRows(results[4]);
-      RAW.targetRates = parseTargetRateRows(results[5]);
-      populateFilters();
-      render();
-      document.getElementById("feedback-fab").classList.add("visible");
+      var data = {
+        revenueTarget: parseRevenueRows(results[0]),
+        unifiedFact: parseProjectRows(results[1]),
+        hubspotDeals: parseDealRows(results[2]),
+        utilisation: parseUtilisationRows(results[3]),
+        certifications: parseCertRows(results[4]),
+        pl: [],
+        employeeRoster: [],
+        refProjects: [],
+      };
+      document.getElementById("oc-loading").style.display = "none";
+      document.getElementById("oc-content").style.display = "block";
+      onDataLoaded(data);
+      document.getElementById("oc-feedback-fab").style.display = "flex";
     }
 
     function showAccessDenied(email) {
-      var placeholder = document.getElementById("placeholder");
-      placeholder.innerHTML = "<div>" + escapeHtml(email) + " isn't on the access list for this dashboard yet.<br>Ask an admin to add you via Manage Access.</div>";
-      placeholder.classList.remove("hidden");
-      document.getElementById("app").classList.remove("visible");
+      var placeholder = document.getElementById("oc-placeholder");
+      placeholder.innerHTML = escHtml(email) + " isn't on the access list for this dashboard yet.<br>Ask an admin to add you via Manage Access.";
+      placeholder.style.display = "block";
+      document.getElementById("oc-content").style.display = "none";
     }
 
     // Checks the access allowlist (Graph token is separate from the Power BI
@@ -1873,13 +1791,15 @@
       }
       CURRENT_SESSION.email = account.username;
       CURRENT_SESSION.role = access.role;
-      document.getElementById("manage-access-btn").style.display = access.role === "admin" ? "inline-block" : "none";
+      STATE.email = account.username;
+      STATE.isAccessAdmin = access.role === 'admin';
+      document.getElementById("oc-access-btn").style.display = access.role === "admin" ? "flex" : "none";
       await loadReport(powerBiToken);
     }
 
     // ---- Manage access modal wiring ----
     (function () {
-      var btn = document.getElementById("manage-access-btn");
+      var btn = document.getElementById("oc-access-btn");
       var overlay = document.getElementById("access-modal-overlay");
       var listEl = document.getElementById("access-list");
       var emailInput = document.getElementById("access-add-email");
@@ -1889,23 +1809,23 @@
 
       function renderRows(rows) {
         if (!rows.length) {
-          listEl.innerHTML = '<div style="font-size:12.5px; color:#8a938d;">No one added yet — you (as a bootstrap admin) are still the only one who can sign in.</div>';
+          listEl.innerHTML = '<div class="oc-caption">No one added yet — you (as a bootstrap admin) are still the only one who can sign in.</div>';
           return;
         }
         listEl.innerHTML = rows.map(function (r) {
           var isSelf = r.email === (CURRENT_SESSION.email || "").toLowerCase();
           var actionBtn = r.status === "active"
-            ? (isSelf ? '<span style="font-size:11px; color:#8a938d;">(you)</span>' : '<button class="feedback-btn feedback-btn-ghost" data-deactivate="' + escapeHtml(r.email) + '" style="padding:4px 10px; font-size:11px;">Deactivate</button>')
-            : '<span style="font-size:11px; color:#8a938d;">Deactivated</span>';
-          return '<div class="access-row"><div>' + escapeHtml(r.email) + '</div>' +
+            ? (isSelf ? '<span class="oc-caption">(you)</span>' : '<button class="oc-btn oc-btn-danger" data-deactivate="' + escAttr(r.email) + '" style="padding:4px 10px; font-size:11px;">Deactivate</button>')
+            : '<span class="oc-caption">Deactivated</span>';
+          return '<div class="oc-editor-row"><div>' + escHtml(r.email) + '</div>' +
             '<div style="display:flex; align-items:center; gap:8px;">' +
-            '<span class="access-role-chip' + (r.role === "admin" ? " admin" : "") + '">' + escapeHtml(r.role) + '</span>' +
+            '<span class="oc-role-chip' + (r.role === "admin" ? " admin" : "") + '">' + escHtml(r.role) + '</span>' +
             actionBtn + '</div></div>';
         }).join("");
       }
 
       async function refreshList() {
-        listEl.innerHTML = '<div style="font-size:12.5px; color:#8a938d;">Loading…</div>';
+        listEl.innerHTML = '<div class="oc-caption">Loading…</div>';
         var token = await getFeedbackGraphToken();
         var basePath = feedbackWorkbookBasePath();
         await ensureAccessUsersTable(token, basePath);
@@ -1917,10 +1837,10 @@
         emailInput.value = "";
         roleSelect.value = "user";
         status.textContent = "";
-        status.className = "feedback-status";
+        status.className = "oc-ask-status";
         overlay.classList.add("open");
         refreshList().catch(function (e) {
-          listEl.innerHTML = '<div class="feedback-status error">' + escapeHtml(e && e.message ? e.message : String(e)) + "</div>";
+          listEl.innerHTML = '<div class="oc-ask-status oc-ask-error">' + escHtml(e && e.message ? e.message : String(e)) + "</div>";
         });
       }
       function closeModal() { overlay.classList.remove("open"); }
@@ -1934,19 +1854,19 @@
         var email = emailInput.value.trim();
         if (!email) {
           status.textContent = "Enter an email first.";
-          status.className = "feedback-status error";
+          status.className = "oc-ask-status oc-ask-error";
           return;
         }
         saveBtn.disabled = true;
         status.textContent = "";
-        status.className = "feedback-status";
+        status.className = "oc-ask-status";
         try {
           var token = await getFeedbackGraphToken();
           var basePath = feedbackWorkbookBasePath();
           await upsertAccessUser(token, basePath, email, roleSelect.value, CURRENT_SESSION.email);
           emailInput.value = "";
           status.textContent = "Added to the app's access list.";
-          status.className = "feedback-status ok";
+          status.className = "oc-ask-status oc-ask-ok";
           await refreshList();
 
           // Also grant real Power BI workspace access (Viewer) — the
@@ -1963,11 +1883,11 @@
             status.textContent = "Added to the app's access list, but could not add to the Power BI workspace: " +
               (pbiErr && pbiErr.message ? pbiErr.message : String(pbiErr)) +
               ". They may need to be added there separately (e.g. if you're not a workspace admin, or they already have access).";
-            status.className = "feedback-status error";
+            status.className = "oc-ask-status oc-ask-error";
           }
         } catch (e) {
           status.textContent = (e && e.message) ? e.message : String(e);
-          status.className = "feedback-status error";
+          status.className = "oc-ask-status oc-ask-error";
         } finally {
           saveBtn.disabled = false;
         }
@@ -1980,13 +1900,13 @@
         target.disabled = true;
         target.textContent = "Deactivating…";
         status.textContent = "";
-        status.className = "feedback-status";
+        status.className = "oc-ask-status";
         try {
           var token = await getFeedbackGraphToken();
           var basePath = feedbackWorkbookBasePath();
           await deactivateAccessUser(token, basePath, email);
           status.textContent = "Removed from the app's access list.";
-          status.className = "feedback-status ok";
+          status.className = "oc-ask-status oc-ask-ok";
           await refreshList();
 
           // Mirrors the "Add" flow: also revoke real Power BI workspace
@@ -2000,18 +1920,18 @@
             status.textContent = "Removed from the app's access list, but could not remove from the Power BI workspace: " +
               (pbiErr && pbiErr.message ? pbiErr.message : String(pbiErr)) +
               ". They may still have real data access there until removed manually.";
-            status.className = "feedback-status error";
+            status.className = "oc-ask-status oc-ask-error";
           }
         } catch (e2) {
           status.textContent = (e2 && e2.message) ? e2.message : String(e2);
-          status.className = "feedback-status error";
+          status.className = "oc-ask-status oc-ask-error";
         }
       });
     })();
 
     // ---- Feedback modal wiring ----
     (function () {
-      var fab = document.getElementById("feedback-fab");
+      var fab = document.getElementById("oc-feedback-fab");
       var overlay = document.getElementById("feedback-modal-overlay");
       var textarea = document.getElementById("feedback-message");
       var status = document.getElementById("feedback-status");
@@ -2020,7 +1940,7 @@
       function openModal() {
         textarea.value = "";
         status.textContent = "";
-        status.className = "feedback-status";
+        status.className = "oc-ask-status";
         sendBtn.disabled = false;
         sendBtn.textContent = "Send";
         overlay.classList.add("open");
@@ -2037,22 +1957,22 @@
         var message = textarea.value.trim();
         if (!message) {
           status.textContent = "Enter a message first.";
-          status.className = "feedback-status error";
+          status.className = "oc-ask-status oc-ask-error";
           return;
         }
         sendBtn.disabled = true;
         sendBtn.textContent = "Sending…";
         status.textContent = "";
-        status.className = "feedback-status";
+        status.className = "oc-ask-status";
         try {
           await submitFeedbackRow(message);
           status.textContent = "Thanks — feedback saved.";
-          status.className = "feedback-status ok";
+          status.className = "oc-ask-status oc-ask-ok";
           sendBtn.textContent = "Sent";
           setTimeout(closeModal, 1200);
         } catch (e) {
           status.textContent = (e && e.message) ? e.message : String(e);
-          status.className = "feedback-status error";
+          status.className = "oc-ask-status oc-ask-error";
           sendBtn.disabled = false;
           sendBtn.textContent = "Send";
         }
@@ -2070,7 +1990,7 @@
       }
     }
 
-    document.getElementById("signin-btn").addEventListener("click", signIn);
+    document.getElementById("oc-signin-btn").addEventListener("click", signIn);
 
     (async function () {
       await msalReady;
