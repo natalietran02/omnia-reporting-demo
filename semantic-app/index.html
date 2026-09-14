@@ -1702,14 +1702,394 @@
       return STATE.entity.replace(/\s+/g, '-').toLowerCase() + '-' + monthPart;
     }
 
-    // ---- Page dispatch (Phase 2 will replace each placeholder with a real
-    // ported render*Page function, one nav item at a time) ----
+    // ---- Data-layer aggregates (ported from the Apps Script engine, minus
+    // its Elysium/legacy-source cutover branching — every entity here reads
+    // from the same shared tables uniformly). Some of these read fields
+    // (available_days, billed_amount on data_utilisation; all of data_pl,
+    // data_employee_roster, data_ref_projects) that Phase 1 hasn't wired up
+    // as live DAX queries yet, so they resolve to null/— until then rather
+    // than throwing. ----
+    function revenueActualForMonths(monthsSet) {
+      var rows = rowsForMonths(RAW.revenueTarget || [], 'month_date', 'entity', monthsSet);
+      return rows.length ? rows.reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0) : null;
+    }
+    function revenueTargetForMonths(monthsSet) {
+      var rows = rowsForMonths(RAW.revenueTarget || [], 'month_date', 'entity', monthsSet);
+      return rows.length ? rows.reduce(function (s, r) { return s + (Number(r.revenue_target) || 0); }, 0) : null;
+    }
+    function unifiedFactRevenueForMonths(monthsSet) {
+      var rows = rowsForMonths(RAW.unifiedFact || [], 'month_date', 'entity', monthsSet);
+      return rows.length ? rows.reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0) : null;
+    }
+    function activeClientCount(rows) {
+      var set = {};
+      rows.forEach(function (r) { if (r.client_name && (Number(r.total_revenue) || 0) > 0) set[r.client_name] = true; });
+      return Object.keys(set).length;
+    }
+    function monthlyAverage(rows, months, dateField, entityField, computeFn) {
+      if (!months.length) return null;
+      var total = 0;
+      months.forEach(function (m) { total += computeFn(rowsForMonths(rows, dateField, entityField, [m])); });
+      return total / months.length;
+    }
+    function utilPctSafe(rows) {
+      var invoiced = rows.reduce(function (s, r) { return s + (Number(r.invoiced_days) || 0); }, 0);
+      var available = rows.reduce(function (s, r) { return s + (Number(r.available_days) || 0); }, 0);
+      return available ? (invoiced / available) * 100 : null;
+    }
+    function avgDailyRateSafe(rows) {
+      var invoiced = rows.reduce(function (s, r) { return s + (Number(r.invoiced_days) || 0); }, 0);
+      var amount = rows.reduce(function (s, r) { return s + (Number(r.billed_amount) || 0); }, 0);
+      return invoiced ? amount / invoiced : null;
+    }
+    function billableFteForMonths(monthsSet) {
+      var rows = rowsForMonths(RAW.utilisation || [], 'month', 'Omnia_Company', monthsSet);
+      var hasFte = rows.some(function (r) { return r.fte != null && r.fte !== ''; });
+      return hasFte ? rows.reduce(function (s, r) { return s + (Number(r.fte) || 0); }, 0) : null;
+    }
+    function utilPctForMonths(monthsSet) {
+      if (monthsSet.length === 1 && isMonthInProgress(monthsSet[0])) return null;
+      return utilPctSafe(rowsForMonths(RAW.utilisation || [], 'month', 'Omnia_Company', monthsSet));
+    }
+    function avgDailyRateForMonths(monthsSet) {
+      if (monthsSet.length === 1 && isMonthInProgress(monthsSet[0])) return null;
+      return avgDailyRateSafe(rowsForMonths(RAW.utilisation || [], 'month', 'Omnia_Company', monthsSet));
+    }
+
+    // ---- data_pl summary (empty until Phase 1 adds the query — every
+    // consumer below already treats a null/missing field as "no target/
+    // actual available yet" rather than assuming zero) ----
+    var PL_OPEX_CATEGORIES = [
+      { key: 'wages_salaries_indirect', label: 'Wages & salaries (indirect)' },
+      { key: 'employee_benefits', label: 'Employee benefits' },
+      { key: 'sales_marketing', label: 'Sales & marketing' },
+      { key: 'travel_expenses', label: 'Travel expenses' },
+      { key: 'administrative_expenses', label: 'Administrative expenses' },
+      { key: 'rent_expense', label: 'Rent expense' },
+      { key: 'recruitment_expense', label: 'Recruitment expense' },
+      { key: 'other_operating_expenses', label: 'Other operating expenses' },
+    ];
+    function plSum(rows, field) { return rows.reduce(function (s, r) { return s + (Number(r[field]) || 0); }, 0); }
+    function plSumAbs(rows, field) { return rows.reduce(function (s, r) { return s + Math.abs(Number(r[field]) || 0); }, 0); }
+    function plSumAbsOrNull(rows, field) {
+      var anyPresent = rows.some(function (r) { return r[field] != null && r[field] !== ''; });
+      return anyPresent ? plSumAbs(rows, field) : null;
+    }
+    function plAvgPct(rows, field) {
+      var vals = rows.map(function (r) { return r[field]; }).filter(function (v) { return v != null && v !== '' && !isNaN(Number(v)); });
+      if (!vals.length) return null;
+      return (vals.reduce(function (s, v) { return s + Number(v); }, 0) / vals.length) * 100;
+    }
+    function plAvg(rows, field) {
+      var vals = rows.map(function (r) { return r[field]; }).filter(function (v) { return v != null && v !== '' && !isNaN(Number(v)); });
+      if (!vals.length) return null;
+      return vals.reduce(function (s, v) { return s + Number(v); }, 0) / vals.length;
+    }
+    function computePlCoreFromRows(rows) {
+      if (!rows.length) return null;
+      function plSumOrNull(field) {
+        var anyPresent = rows.some(function (r) { return r[field] != null && r[field] !== ''; });
+        return anyPresent ? plSum(rows, field) : null;
+      }
+      var revenueActual = plSumOrNull('revenue_actual');
+      var gpActual = plSumOrNull('gross_margin_actual');
+      var grossMarginPctActual = (revenueActual && gpActual != null) ? (gpActual / revenueActual) * 100 : null;
+      var directCostsActual = plSumAbsOrNull(rows, 'direct_costs_actual');
+      var directCostsForecast = plSumAbsOrNull(rows, 'direct_costs_forecast');
+      var opexActual = plSumAbsOrNull(rows, 'operating_expenses_actual');
+      var opexForecast = plSumAbsOrNull(rows, 'operating_expenses_forecast');
+      var revenueBudget = plSumOrNull('revenue_budget');
+      var gpBudget = plSumOrNull('gp_budget');
+      var ebitdaBudget = plSumOrNull('ebitda_budget');
+      var grossMarginPctBudget = (revenueBudget && gpBudget != null) ? (gpBudget / revenueBudget) * 100 : null;
+      var gpForecast = plSumOrNull('gross_margin_forecast');
+      var grossMarginPctForecast = (revenueBudget && gpForecast != null) ? (gpForecast / revenueBudget) * 100 : null;
+      var ebitdaActual = plSumOrNull('ebitda_actual');
+      var ebitdaPctActual = (revenueActual && ebitdaActual != null) ? (ebitdaActual / revenueActual) * 100 : null;
+      var ebitdaPctBudget = (revenueBudget && ebitdaBudget != null) ? (ebitdaBudget / revenueBudget) * 100 : null;
+      var categories = PL_OPEX_CATEGORIES.map(function (c) {
+        return { key: c.key, label: c.label, actual: plSumAbsOrNull(rows, c.key + '_actual'), forecast: plSumAbsOrNull(rows, c.key + '_forecast') };
+      });
+      return {
+        revenueActual: revenueActual, revenueBudget: revenueBudget,
+        gpActual: gpActual, gpBudget: gpBudget, gpForecast: gpForecast,
+        grossMarginPctActual: grossMarginPctActual, grossMarginPctBudget: grossMarginPctBudget, grossMarginPctForecast: grossMarginPctForecast,
+        directCostsActual: directCostsActual, directCostsForecast: directCostsForecast,
+        opexActual: opexActual, opexForecast: opexForecast,
+        ebitdaActual: ebitdaActual, ebitdaBudget: ebitdaBudget,
+        ebitdaPctActual: ebitdaPctActual, ebitdaPctBudget: ebitdaPctBudget,
+        utilisationPctBudget: plAvgPct(rows, 'utilisation_budget'),
+        headcountBudget: plAvg(rows, 'headcount_budget'),
+        dailyRateBudget: plAvg(rows, 'daily_rate_budget'),
+        categories: categories,
+      };
+    }
+    function plSummaryForMonths(monthsSet) {
+      return computePlCoreFromRows(rowsForMonths(RAW.pl || [], 'month', 'Omnia_Company', monthsSet));
+    }
+
+    // ---- Takeaways page ----
+    function computeKpis() {
+      var cmp = comparisonBounds();
+
+      var revActual = revenueActualForMonths(cardMonths());
+      var revCmpActual = revenueActualForMonths(cardComparisonMonths());
+      var revDeltaPct = revCmpActual ? ((revActual - revCmpActual) / revCmpActual) * 100 : null;
+
+      var plCur = plSummaryForMonths(cardMonths());
+      var marginPct = plCur ? plCur.grossMarginPctActual : null;
+      var marginBadge = null, marginGood = null;
+      if (cmp) {
+        var plCmp = plSummaryForMonths(cardComparisonMonths());
+        var marginCmp = plCmp ? plCmp.grossMarginPctActual : null;
+        if (marginPct != null && marginCmp != null) {
+          var marginDeltaPts = marginPct - marginCmp;
+          var marginRelPct = marginCmp ? (marginDeltaPts / marginCmp) * 100 : null;
+          marginBadge = signedPts(marginDeltaPts) + (marginRelPct != null ? ' (' + fmtDelta(marginRelPct) + ')' : '') + ' ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase();
+          marginGood = marginDeltaPts > 0 ? true : marginDeltaPts < 0 ? false : 'neutral';
+        }
+      }
+      var marginTargetBadge = null, marginTargetGood = null;
+      if (marginPct != null && plCur && plCur.grossMarginPctBudget != null) {
+        var marginTargetDeltaPts = marginPct - plCur.grossMarginPctBudget;
+        var marginTargetRelPct = plCur.grossMarginPctBudget ? (marginTargetDeltaPts / plCur.grossMarginPctBudget) * 100 : null;
+        marginTargetBadge = signedPts(marginTargetDeltaPts) + (marginTargetRelPct != null ? ' (' + fmtDelta(marginTargetRelPct) + ')' : '') + ' vs target';
+        marginTargetGood = marginTargetDeltaPts > 0 ? true : marginTargetDeltaPts < 0 ? false : 'neutral';
+      }
+
+      var clientsAvg = monthlyAverage(RAW.unifiedFact || [], cardMonths(), 'month_date', 'entity', activeClientCount);
+      var clientsBadge = null, clientsGood = null;
+      if (cmp) {
+        var clientsCmpAvg = monthlyAverage(RAW.unifiedFact || [], cardComparisonMonths(), 'month_date', 'entity', activeClientCount);
+        if (clientsAvg != null && clientsCmpAvg) {
+          var clientsDeltaAbs = clientsAvg - clientsCmpAvg;
+          var clientsDeltaPct = (clientsDeltaAbs / clientsCmpAvg) * 100;
+          clientsBadge = signedCount(clientsDeltaAbs, 1) + ' (' + fmtDelta(clientsDeltaPct) + ') ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase();
+          clientsGood = clientsDeltaPct > 0 ? true : clientsDeltaPct < 0 ? false : 'neutral';
+        }
+      }
+
+      var fteAvg = billableFteForMonths(cardMonths());
+      var fteBadge = null, fteGood = null;
+      if (cmp) {
+        var fteCmpAvg = billableFteForMonths(cardComparisonMonths());
+        if (fteAvg != null && fteCmpAvg) {
+          var fteDeltaAbs = fteAvg - fteCmpAvg;
+          var fteDeltaPct = (fteDeltaAbs / fteCmpAvg) * 100;
+          fteBadge = signedCount(fteDeltaAbs, 1) + ' (' + fmtDelta(fteDeltaPct) + ') ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase();
+          fteGood = fteDeltaPct > 0 ? true : fteDeltaPct < 0 ? false : 'neutral';
+        }
+      }
+      var fteTargetBadge = null, fteTargetGood = null;
+      if (fteAvg != null && plCur && plCur.headcountBudget != null && plCur.headcountBudget) {
+        var fteTargetDeltaAbs = fteAvg - plCur.headcountBudget;
+        var fteTargetDeltaPct = (fteTargetDeltaAbs / plCur.headcountBudget) * 100;
+        fteTargetBadge = signedCount(fteTargetDeltaAbs, 1) + ' (' + fmtDelta(fteTargetDeltaPct) + ') vs target';
+        fteTargetGood = fteTargetDeltaPct > 0 ? true : fteTargetDeltaPct < 0 ? false : 'neutral';
+      }
+
+      var utilPct = utilPctForMonths(cardMonths());
+      var utilBadge = null, utilGood = null;
+      if (cmp) {
+        var utilPctCmp = utilPctForMonths(cardComparisonMonths());
+        if (utilPct != null && utilPctCmp != null) {
+          var utilDeltaPts = utilPct - utilPctCmp;
+          var utilRelPct = utilPctCmp ? (utilDeltaPts / utilPctCmp) * 100 : null;
+          utilBadge = signedPts(utilDeltaPts) + (utilRelPct != null ? ' (' + fmtDelta(utilRelPct) + ')' : '') + ' ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase();
+          utilGood = utilDeltaPts > 0 ? true : utilDeltaPts < 0 ? false : 'neutral';
+        }
+      }
+      var utilTargetForCaption = null;
+      if (utilPct == null) {
+        var utilPlForCaption = plSummaryForMonths(cardMonths());
+        if (utilPlForCaption && utilPlForCaption.utilisationPctBudget != null) utilTargetForCaption = utilPlForCaption.utilisationPctBudget;
+      }
+      var utilCaption = utilTargetForCaption != null ? '<span style="color:var(--oc-coral); font-weight:700;">Target: ' + fmtPct(utilTargetForCaption) + '</span>' : cardPeriodLabelText();
+      var utilTargetBadge = null, utilTargetGood = null;
+      if (utilPct != null && plCur && plCur.utilisationPctBudget != null) {
+        var utilTargetDeltaPts = utilPct - plCur.utilisationPctBudget;
+        var utilTargetRelPct = plCur.utilisationPctBudget ? (utilTargetDeltaPts / plCur.utilisationPctBudget) * 100 : null;
+        utilTargetBadge = signedPts(utilTargetDeltaPts) + (utilTargetRelPct != null ? ' (' + fmtDelta(utilTargetRelPct) + ')' : '') + ' vs target';
+        utilTargetGood = utilTargetDeltaPts > 0 ? true : utilTargetDeltaPts < 0 ? false : 'neutral';
+      }
+
+      var revBadge = (revDeltaPct != null && revCmpActual) ? signedCurrency(revActual - revCmpActual) + ' (' + fmtDelta(revDeltaPct) + ') ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase() : null;
+      var revGood = revDeltaPct != null ? (revDeltaPct > 0 ? true : revDeltaPct < 0 ? false : 'neutral') : null;
+      var revTargetForCard = revenueTargetForMonths(cardMonths());
+      var revTargetBadge = null, revTargetGood = null;
+      if (revActual != null && revTargetForCard) {
+        var revGapDollar = revActual - revTargetForCard;
+        var revGapPct = (revGapDollar / revTargetForCard) * 100;
+        revTargetBadge = signedCurrency(revGapDollar) + ' (' + fmtDelta(revGapPct) + ') vs target';
+        revTargetGood = revGapDollar > 0 ? true : revGapDollar < 0 ? false : 'neutral';
+      }
+
+      return [
+        { label: 'Billable revenue', value: fmtCurrency(revActual), deltaLabel: revBadge, good: revGood, targetLabel: revTargetBadge, targetGood: revTargetGood, caption: cardPeriodLabelText(), nav: 'revenue' },
+        { label: 'Utilisation', value: utilPct != null ? fmtPct(utilPct) : '—', deltaLabel: utilBadge, good: utilGood, targetLabel: utilTargetBadge, targetGood: utilTargetGood, caption: utilCaption, nav: 'utilisation' },
+        { label: 'Gross margin %', value: marginPct != null ? fmtPct(marginPct) : '—', deltaLabel: marginBadge, good: marginGood, targetLabel: marginTargetBadge, targetGood: marginTargetGood, caption: cardPeriodLabelText(), nav: 'margins' },
+        { label: 'Active clients', value: clientsAvg != null ? Math.round(clientsAvg) : '—', deltaLabel: clientsBadge, good: clientsGood, caption: cardPeriodLabelText(), nav: 'clients' },
+        { label: 'Billable FTE', value: fteAvg != null ? fteAvg.toFixed(1) : '—', deltaLabel: fteBadge, good: fteGood, targetLabel: fteTargetBadge, targetGood: fteTargetGood, caption: cardPeriodLabelText(), nav: 'utilisation' },
+      ];
+    }
+    function renderKpiGrid() {
+      var kpis = computeKpis();
+      return '<section class="oc-kpi-grid">' + kpis.map(function (k) {
+        var targetBadge = k.targetLabel ? '<span class="oc-badge ' + (k.targetGood === false ? 'down' : k.targetGood === 'neutral' ? 'neutral' : 'up') + '">' + k.targetLabel + '</span>' : '';
+        var badge = k.deltaLabel ? '<span class="oc-badge ' + (k.good === false ? 'down' : k.good === 'neutral' ? 'neutral' : 'up') + '">' + k.deltaLabel + '</span>' : '';
+        var deltaRow = (targetBadge || badge) ? '<div class="oc-kpi-delta-row" style="flex-direction:column; align-items:flex-start; gap:4px;">' + (targetBadge ? '<div>' + targetBadge + '</div>' : '') + (badge ? '<div>' + badge + '</div>' : '') + '</div>' : '';
+        return '<div class="oc-kpi-card' + (k.nav ? ' oc-kpi-clickable' : '') + '"' + (k.nav ? ' data-nav="' + k.nav + '"' : '') + '><div class="oc-kpi-label">' + k.label + '</div><div class="oc-kpi-value">' + k.value + '</div>' +
+          deltaRow + (k.caption ? '<div class="oc-caption" style="margin-top:6px;">' + k.caption + '</div>' : '') + '</div>';
+      }).join('') + '</section>';
+    }
+    function wireKpiCards(container) {
+      Array.prototype.forEach.call(container.querySelectorAll('.oc-kpi-card[data-nav]'), function (card) {
+        card.addEventListener('click', function () { goToPage(card.getAttribute('data-nav')); });
+      });
+    }
+
+    function computeCumulativeBars() {
+      var b = periodBounds();
+      if (!b) return [];
+      var fyMonths = rangeMonths(fyStart(fyEndYear(b.end)), b.end);
+      var cumRevenue = 0, cumTarget = 0;
+      return fyMonths.map(function (m) {
+        var monthRevenue = revenueActualForMonths([m]) || 0;
+        var monthTarget = revenueTargetForMonths([m]) || 0;
+        cumRevenue += monthRevenue; cumTarget += monthTarget;
+        return { month: m, monthRevenue: monthRevenue, monthTarget: monthTarget, cumRevenue: cumRevenue, cumTarget: cumTarget };
+      });
+    }
+    function renderCumulativeRevenueChart() {
+      var b = periodBounds();
+      if (!b) return '<div class="oc-empty-panel">No months selected.</div>';
+      var bars = computeCumulativeBars();
+      var maxVal = Math.max.apply(null, bars.map(function (x) { return Math.max(x.cumRevenue, x.cumTarget); }).concat([1]));
+      var sizes = chartLabelSizes(bars.length);
+
+      var actualToDate = bars.length ? bars[bars.length - 1].cumRevenue : 0;
+      var targetForPeriod = bars.length ? bars[bars.length - 1].cumTarget : 0;
+      var gapDollar = targetForPeriod ? actualToDate - targetForPeriod : null;
+      var gapPct = targetForPeriod ? ((actualToDate - targetForPeriod) / targetForPeriod) * 100 : null;
+      var gapGood = gapPct == null ? null : gapPct > 0 ? true : gapPct < 0 ? false : 'neutral';
+      var gapLabel = (gapDollar != null && gapPct != null) ? signedCurrency(gapDollar) + ' (' + fmtDelta(gapPct) + ')' : '—';
+
+      var cardsHtml = '<div style="display:flex; gap:14px; margin-bottom:14px; flex-wrap:wrap;">' +
+        '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px; flex:1; min-width:150px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Actual to date</div><div style="font-size:20px; font-weight:800;">' + fmtCurrency(actualToDate) + '</div></div>' +
+        '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px; flex:1; min-width:150px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Target for period</div><div style="font-size:20px; font-weight:800;">' + fmtCurrency(targetForPeriod) + '</div></div>' +
+        '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px; flex:1; min-width:150px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Gap to target</div><div style="font-size:20px; font-weight:800;"><span class="oc-badge ' + (gapGood === false ? 'down' : gapGood === 'neutral' ? 'neutral' : 'up') + '" style="font-size:16px;">' + gapLabel + '</span></div></div></div>';
+
+      var barsHtml = bars.map(function (x) {
+        var heightPct = maxVal ? (x.cumRevenue / maxVal) * 100 : 0;
+        var monthSegPct = x.cumRevenue ? (x.monthRevenue / x.cumRevenue) * 100 : 0;
+        var targetTopPct = maxVal ? 100 - (x.cumTarget / maxVal) * 100 : 100;
+        var inProgress = isMonthInProgress(x.month);
+        var segStyle = inProgress ? 'background:repeating-linear-gradient(45deg, var(--oc-mint-deep), var(--oc-mint-deep) 4px, var(--oc-mint-soft) 4px, var(--oc-mint-soft) 8px);' : '';
+        var xGapDollar = x.cumTarget ? x.cumRevenue - x.cumTarget : null;
+        var xGapPct = x.cumTarget ? ((x.cumRevenue - x.cumTarget) / x.cumTarget) * 100 : null;
+        var xGapClass = xGapPct == null ? 'neutral' : xGapPct > 0 ? 'up' : xGapPct < 0 ? 'down' : 'neutral';
+        var xGapLabel = (xGapDollar != null && xGapPct != null) ? signedCurrency(xGapDollar) + ' (' + fmtDelta(xGapPct) + ')' : '—';
+        var stackedLabel = '<div class="oc-cum-label" style="font-size:' + sizes.value + 'px; line-height:1.4;">' +
+          'A: ' + fmtCurrency(x.cumRevenue) +
+          (x.cumTarget ? '<br><span style="color:var(--oc-coral);">T: ' + fmtCurrency(x.cumTarget) + '</span>' : '') +
+          (xGapPct != null ? '<br><span class="oc-badge ' + xGapClass + '" style="font-size:' + Math.max(sizes.value - 1, 9) + 'px; padding:1px 5px;">' + xGapLabel + '</span>' : '') + '</div>';
+        return '<div class="oc-cum-col">' + stackedLabel +
+          '<div class="oc-cum-bar-wrap">' +
+            '<div class="oc-cum-target-line" style="top:' + targetTopPct.toFixed(1) + '%;" title="Target — ' + fmtCurrency(x.cumTarget) + '"></div>' +
+            '<div class="oc-cum-bar" style="height:' + heightPct.toFixed(1) + '%;"><div class="oc-cum-bar-seg" style="height:' + monthSegPct.toFixed(1) + '%; ' + segStyle + '" title="' + (inProgress ? 'Known — month still in progress' : '') + '"></div></div>' +
+          '</div></div>';
+      }).join('');
+      var monthRowHtml = bars.map(function (x) {
+        var inProgress = isMonthInProgress(x.month);
+        return '<div class="oc-cum-month-col"><div class="oc-cum-month-label" style="font-size:' + sizes.month + 'px; color:' + (inProgress ? 'var(--oc-mint-deep)' : 'var(--fg2)') + ';">' + MONTH_NAMES[x.month.getMonth()] + '</div><div class="oc-cum-year-label" style="font-size:' + sizes.year + 'px;">' + x.month.getFullYear() + '</div></div>';
+      }).join('');
+
+      return '<div>' + cardsHtml +
+        '<div style="display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:6px;"><div class="oc-multiple-label">Cumulative billable revenue</div><div class="oc-caption">Period total ' + fmtCurrency(actualToDate) + '</div></div>' +
+        '<div class="oc-legend">' +
+          '<span class="sw"><span class="oc-sw-box" style="background:var(--oc-deep-teal);"></span>Month</span>' +
+          '<span class="sw"><span class="oc-sw-box" style="background:rgba(1,67,72,0.16);"></span>Prior months (cumulative)</span>' +
+          '<span class="sw"><span class="oc-sw-box" style="background:var(--oc-mint-deep);"></span>Current month (known)</span>' +
+          '<span class="sw"><span class="oc-sw-dash" style="border-color:var(--oc-coral);"></span>Target (cumulative)</span></div>' +
+        '<div class="oc-cum-row">' + barsHtml + '</div><div class="oc-cum-month-row">' + monthRowHtml + '</div></div>';
+    }
+
+    var SMALL_MULTIPLES = [
+      { key: 'utilisation', label: 'Utilisation', color: 'var(--oc-deep-teal)', fmt: fmtPct },
+      { key: 'margin', label: 'Gross margin %', color: 'var(--oc-coral)', fmt: fmtPct },
+      { key: 'clients', label: 'Active clients', color: 'var(--oc-mint-deep)', fmt: function (n) { return Math.round(n); } },
+      { key: 'fte', label: 'Billable FTE', color: 'var(--oc-mid-teal)', fmt: function (n) { return n.toFixed(1); } },
+    ];
+    function renderSmallMultiples() {
+      var b = periodBounds();
+      if (!b) return '';
+      var cards = SMALL_MULTIPLES.map(function (metric) {
+        var series = b.months.map(function (m) {
+          if (metric.key === 'utilisation') return utilPctForMonths([m]);
+          if (metric.key === 'fte') return billableFteForMonths([m]);
+          if (metric.key === 'margin') { var pl = plSummaryForMonths([m]); return pl ? pl.grossMarginPctActual : null; }
+          var rows = rowsForMonths(RAW.unifiedFact || [], 'month_date', 'entity', [m]);
+          if (!rows.length) return null;
+          if (metric.key === 'clients') return activeClientCount(rows);
+          return null;
+        });
+        return renderSparklineCard(metric, series, b.months, null, null, metric.key === 'utilisation');
+      }).join('');
+      return '<div class="oc-multiples-grid">' + cards + '</div>';
+    }
+
+    function renderTakeawaysPage() {
+      var bars = computeCumulativeBars();
+      var b = periodBounds();
+
+      var takeawaysCsvRows = [];
+      takeawaysCsvRows.push(['Cumulative billable revenue']);
+      takeawaysCsvRows.push(['Month', 'Revenue', 'Target', 'Cumulative revenue', 'Cumulative target']);
+      bars.forEach(function (r) { takeawaysCsvRows.push([monthYearLabel(r.month), r.monthRevenue.toFixed(2), r.monthTarget.toFixed(2), r.cumRevenue.toFixed(2), r.cumTarget.toFixed(2)]); });
+      if (b) {
+        SMALL_MULTIPLES.forEach(function (metric) {
+          takeawaysCsvRows.push([]);
+          takeawaysCsvRows.push([metric.label]);
+          takeawaysCsvRows.push(['Month', metric.label]);
+          b.months.forEach(function (m) {
+            var v = metric.key === 'utilisation' ? utilPctForMonths([m])
+              : metric.key === 'fte' ? billableFteForMonths([m])
+              : metric.key === 'margin' ? (function () { var pl = plSummaryForMonths([m]); return pl ? pl.grossMarginPctActual : null; })()
+              : (function () { var rows = rowsForMonths(RAW.unifiedFact || [], 'month_date', 'entity', [m]); return rows.length ? activeClientCount(rows) : null; })();
+            takeawaysCsvRows.push([monthYearLabel(m), v != null ? v.toFixed(2) : '']);
+          });
+        });
+      }
+      registerDownload('takeaways', 'takeaways-' + fileSlug() + '.csv', ['Takeaways'], takeawaysCsvRows);
+
+      var utilInProgressNote = (b && isMonthInProgress(b.end)) ? '<div class="oc-note" style="margin-bottom:16px; border-left:3px solid var(--oc-coral); padding-left:12px; background:#fff;">&#9888; Utilisation % isn\'t shown for the current month until it closes.</div>' : '';
+
+      return utilInProgressNote + renderKpiGrid() +
+        '<section class="oc-panel">' +
+          panelHeadWithTools(STATE.entity + ' — Key Takeaways', 'takeaways') +
+          '<div class="oc-panel-sub">Cumulative billable revenue and underlying operating metrics for the selected period.</div>' +
+          renderCumulativeRevenueChart() + renderSmallMultiples() +
+        '</section>';
+    }
+
+    // ---- Page dispatch (Phase 2 will replace each remaining placeholder
+    // with a real ported render*Page function, one nav item at a time) ----
+    function goToPage(pageKey) {
+      STATE.page = pageKey;
+      renderHeader(ENTITIES);
+      renderPage();
+    }
     function renderPage() {
       var el = document.getElementById('oc-content');
       CURRENT_DOWNLOADS = {};
-      var navItem = NAV_ITEMS.filter(function (n) { return n.key === STATE.page; })[0];
-      el.innerHTML = renderPlaceholderPage(navItem ? navItem.label : STATE.page);
+      if (STATE.page === 'takeaways') {
+        el.innerHTML = renderTakeawaysPage();
+      } else {
+        var navItem = NAV_ITEMS.filter(function (n) { return n.key === STATE.page; })[0];
+        el.innerHTML = renderPlaceholderPage(navItem ? navItem.label : STATE.page);
+      }
       wirePillToggles(el);
+      wireKpiCards(el);
       wireDownloadButtons(el);
     }
 
