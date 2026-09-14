@@ -236,17 +236,23 @@
     // Feedback writes to a dedicated Excel workbook via Microsoft Graph — a
     // separate concern from the Power BI dataset query above, since it needs
     // Graph's Files.ReadWrite scope (not Dataset.Read.All) and a real Excel
-    // file to write into. REPLACE_WITH_FEEDBACK_WORKBOOK_SHARE_LINK below
-    // must become a real "anyone in the org with the link can edit" sharing
-    // link to an .xlsx file before feedback will actually save anywhere —
-    // until then the feedback button shows a clear error instead of silently
-    // losing submissions. The app registration (CLIENT_ID above) also needs
-    // the Files.ReadWrite delegated Graph permission added and consented.
-    var FEEDBACK_SHARE_URL = "REPLACE_WITH_FEEDBACK_WORKBOOK_SHARE_LINK";
+    // file to write into. Addressed by driveId+itemId (resolved once via the
+    // Graph shares API — see project notes) rather than by the sharing link
+    // itself: the link grants edit access to whoever holds it, so embedding
+    // it directly in this client-side page would leak an editable link to
+    // anyone who views the page source. driveId/itemId are just identifiers —
+    // Graph still enforces access based on the signed-in caller's own
+    // permission on the item, so these are safe to ship. The app registration
+    // (CLIENT_ID above) needs the Files.ReadWrite(.All) delegated Graph
+    // permission added and consented, and the target file needs to actually
+    // be shared (normal SharePoint/OneDrive permissions) with whoever should
+    // be able to submit feedback.
+    var FEEDBACK_DRIVE_ID = "b!nxzo85sDP0SbRvi-9_y_KVyL_Ahv4PJPifSrs1JXiuHYUPJ6ZuClQJmQ-gq4ilWE";
+    var FEEDBACK_ITEM_ID = "01MFUWM2QFPLMV4GOQBNCZP5ZXH6WOPKVV";
     var FEEDBACK_GRAPH_SCOPE = "https://graph.microsoft.com/Files.ReadWrite";
     var FEEDBACK_SHEET_NAME = "Feedback";
     var FEEDBACK_TABLE_NAME = "FeedbackTable";
-    var feedbackConfigured = FEEDBACK_SHARE_URL.indexOf("REPLACE_") === -1;
+    var feedbackConfigured = !!(FEEDBACK_DRIVE_ID && FEEDBACK_ITEM_ID);
 
     var PIE_COLORS = ["#14201c", "#7c8f89", "#3d7373", "#bfe0cd", "#2f7a63", "#a9c9b8"];
 
@@ -407,14 +413,6 @@
     }
 
     // ---- Feedback (Microsoft Graph → Excel workbook) ----
-    // Microsoft's documented scheme for turning a sharing URL into a Graph
-    // "shares/{id}" token — see learn.microsoft.com/graph/api/shares-get.
-    function encodeSharingUrl(url) {
-      var b64 = btoa(unescape(encodeURIComponent(url)));
-      var unpadded = b64.replace(/=+$/, "").replace(/\//g, "_").replace(/\+/g, "-");
-      return "u!" + unpadded;
-    }
-
     // Separate token acquisition from getToken() above — this needs Graph's
     // Files.ReadWrite scope, not the Power BI Dataset.Read.All one, so it's
     // requested (and consented) independently. Falls back to an interactive
@@ -433,9 +431,8 @@
       }
     }
 
-    async function feedbackWorkbookBasePath() {
-      var shareId = encodeSharingUrl(FEEDBACK_SHARE_URL);
-      return "https://graph.microsoft.com/v1.0/shares/" + shareId + "/driveItem";
+    function feedbackWorkbookBasePath() {
+      return "https://graph.microsoft.com/v1.0/drives/" + FEEDBACK_DRIVE_ID + "/items/" + FEEDBACK_ITEM_ID;
     }
 
     // Creates the Feedback worksheet + table on first-ever submission if they
@@ -487,7 +484,7 @@
 
     async function submitFeedbackRow(message) {
       if (!feedbackConfigured) {
-        throw new Error("Feedback isn't connected to a workbook yet — set FEEDBACK_SHARE_URL in the page source first.");
+        throw new Error("Feedback isn't connected to a workbook yet — set FEEDBACK_DRIVE_ID/FEEDBACK_ITEM_ID in the page source first.");
       }
       var token = await getFeedbackGraphToken();
       var basePath = await feedbackWorkbookBasePath();
