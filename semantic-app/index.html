@@ -456,6 +456,83 @@
       "    \"UserId\", data_utilisation[userId]\n" +
       ")";
 
+    // ---- Phase 1 additions (unverified against the live semantic model —
+    // see executeDaxQueries below: a failed query here returns [] instead
+    // of aborting the whole load, so a wrong column name can't take down
+    // the queries above that are already confirmed working). Field names
+    // are taken from Code.gs/Seed.gs's documented Sheet headers, which is
+    // the best available source of truth, but the Power BI model has
+    // already shown at least one casing deviation from that source
+    // (Project_Name above is capitalized in the model but lowercase in the
+    // Sheet), so these may need column-name fixes after a live test. ----
+    var Q_PL =
+      "EVALUATE\n" +
+      "SUMMARIZECOLUMNS(\n" +
+      "    data_pl[month],\n" +
+      "    data_pl[Omnia_Company],\n" +
+      "    \"RevenueActual\", SUM(data_pl[revenue_actual]),\n" +
+      "    \"RevenueBudget\", SUM(data_pl[revenue_budget]),\n" +
+      "    \"GrossMarginActual\", SUM(data_pl[gross_margin_actual]),\n" +
+      "    \"GrossMarginForecast\", SUM(data_pl[gross_margin_forecast]),\n" +
+      "    \"GpBudget\", SUM(data_pl[gp_budget]),\n" +
+      "    \"EbitdaActual\", SUM(data_pl[ebitda_actual]),\n" +
+      "    \"EbitdaBudget\", SUM(data_pl[ebitda_budget]),\n" +
+      "    \"DirectCostsActual\", SUM(data_pl[direct_costs_actual]),\n" +
+      "    \"DirectCostsForecast\", SUM(data_pl[direct_costs_forecast]),\n" +
+      "    \"OperatingExpensesActual\", SUM(data_pl[operating_expenses_actual]),\n" +
+      "    \"OperatingExpensesForecast\", SUM(data_pl[operating_expenses_forecast]),\n" +
+      "    \"WagesIndirectActual\", SUM(data_pl[wages_salaries_indirect_actual]),\n" +
+      "    \"WagesIndirectForecast\", SUM(data_pl[wages_salaries_indirect_forecast]),\n" +
+      "    \"EmployeeBenefitsActual\", SUM(data_pl[employee_benefits_actual]),\n" +
+      "    \"EmployeeBenefitsForecast\", SUM(data_pl[employee_benefits_forecast]),\n" +
+      "    \"SalesMarketingActual\", SUM(data_pl[sales_marketing_actual]),\n" +
+      "    \"SalesMarketingForecast\", SUM(data_pl[sales_marketing_forecast]),\n" +
+      "    \"TravelActual\", SUM(data_pl[travel_expenses_actual]),\n" +
+      "    \"TravelForecast\", SUM(data_pl[travel_expenses_forecast]),\n" +
+      "    \"AdminActual\", SUM(data_pl[administrative_expenses_actual]),\n" +
+      "    \"AdminForecast\", SUM(data_pl[administrative_expenses_forecast]),\n" +
+      "    \"RentActual\", SUM(data_pl[rent_expense_actual]),\n" +
+      "    \"RentForecast\", SUM(data_pl[rent_expense_forecast]),\n" +
+      "    \"RecruitmentActual\", SUM(data_pl[recruitment_expense_actual]),\n" +
+      "    \"RecruitmentForecast\", SUM(data_pl[recruitment_expense_forecast]),\n" +
+      "    \"OtherOpexActual\", SUM(data_pl[other_operating_expenses_actual]),\n" +
+      "    \"OtherOpexForecast\", SUM(data_pl[other_operating_expenses_forecast]),\n" +
+      "    \"UtilisationBudget\", AVERAGE(data_pl[utilisation_budget]),\n" +
+      "    \"HeadcountBudget\", AVERAGE(data_pl[headcount_budget]),\n" +
+      "    \"DailyRateBudget\", AVERAGE(data_pl[daily_rate_budget])\n" +
+      ")\n" +
+      "ORDER BY data_pl[month]";
+
+    var Q_EMPLOYEE_ROSTER =
+      "EVALUATE\n" +
+      "SELECTCOLUMNS(\n" +
+      "    data_employee_roster,\n" +
+      "    \"UserId\", data_employee_roster[userId],\n" +
+      "    \"OmniaCompany\", data_employee_roster[Omnia_Company],\n" +
+      "    \"RoleTitle\", data_employee_roster[role_title],\n" +
+      "    \"RoleCode\", data_employee_roster[role_code],\n" +
+      "    \"RoleGroup\", data_employee_roster[role_group],\n" +
+      "    \"EmploymentType\", data_employee_roster[employment_type],\n" +
+      "    \"BusinessUnit\", data_employee_roster[business_unit],\n" +
+      "    \"Location\", data_employee_roster[location],\n" +
+      "    \"EmploymentStartDate\", data_employee_roster[employment_start_date],\n" +
+      "    \"TerminationDate\", data_employee_roster[termination_date],\n" +
+      "    \"Tenure\", data_employee_roster[tenure]\n" +
+      ")";
+
+    var Q_REF_PROJECTS =
+      "EVALUATE\n" +
+      "SELECTCOLUMNS(\n" +
+      "    data_ref_projects,\n" +
+      "    \"ProjectCode\", data_ref_projects[Project_Code],\n" +
+      "    \"ProjectName\", data_ref_projects[Project_Name],\n" +
+      "    \"StartDate\", data_ref_projects[Start_Date],\n" +
+      "    \"EndDate\", data_ref_projects[End_Date],\n" +
+      "    \"Client\", data_ref_projects[Client],\n" +
+      "    \"Industry\", data_ref_projects[Industry],\n" +
+      "    \"OmniaCompany\", data_ref_projects[Omnia_Company]\n" +
+      ")";
+
     // This table has no OpCo/entity column, so the Certifications page ignores
     // the OpCo filter entirely (there's nothing to filter it by).
     var Q_CERTIFICATIONS =
@@ -564,10 +641,20 @@
       return data.results[0].tables[0].rows;
     }
 
+    // Each query is isolated — a failure in one (e.g. a Phase-1 query whose
+    // column names haven't been verified against the live model yet)
+    // resolves to an empty row set instead of throwing and aborting every
+    // query after it, so one bad query can never take down data that was
+    // already working.
     async function executeDaxQueries(token, queries) {
       var results = [];
       for (var i = 0; i < queries.length; i++) {
-        results.push(await executeDaxQuery(token, queries[i]));
+        try {
+          results.push(await executeDaxQuery(token, queries[i]));
+        } catch (e) {
+          console.warn('DAX query #' + i + ' failed, continuing with an empty result set:', e && e.message ? e.message : e);
+          results.push([]);
+        }
       }
       return results;
     }
@@ -1480,6 +1567,47 @@
           ActivationStatus: r["[Status]"],
           TrainingCompletionDate: r["[CompletionDate]"],
           ExpirationDate: r["[ExpirationDate]"],
+        };
+      });
+    }
+    function parsePlRows(rows) {
+      return rows.map(function (r) {
+        return {
+          month: r["data_pl[month]"],
+          Omnia_Company: r["data_pl[Omnia_Company]"],
+          revenue_actual: r["[RevenueActual]"], revenue_budget: r["[RevenueBudget]"],
+          gross_margin_actual: r["[GrossMarginActual]"], gross_margin_forecast: r["[GrossMarginForecast]"], gp_budget: r["[GpBudget]"],
+          ebitda_actual: r["[EbitdaActual]"], ebitda_budget: r["[EbitdaBudget]"],
+          direct_costs_actual: r["[DirectCostsActual]"], direct_costs_forecast: r["[DirectCostsForecast]"],
+          operating_expenses_actual: r["[OperatingExpensesActual]"], operating_expenses_forecast: r["[OperatingExpensesForecast]"],
+          wages_salaries_indirect_actual: r["[WagesIndirectActual]"], wages_salaries_indirect_forecast: r["[WagesIndirectForecast]"],
+          employee_benefits_actual: r["[EmployeeBenefitsActual]"], employee_benefits_forecast: r["[EmployeeBenefitsForecast]"],
+          sales_marketing_actual: r["[SalesMarketingActual]"], sales_marketing_forecast: r["[SalesMarketingForecast]"],
+          travel_expenses_actual: r["[TravelActual]"], travel_expenses_forecast: r["[TravelForecast]"],
+          administrative_expenses_actual: r["[AdminActual]"], administrative_expenses_forecast: r["[AdminForecast]"],
+          rent_expense_actual: r["[RentActual]"], rent_expense_forecast: r["[RentForecast]"],
+          recruitment_expense_actual: r["[RecruitmentActual]"], recruitment_expense_forecast: r["[RecruitmentForecast]"],
+          other_operating_expenses_actual: r["[OtherOpexActual]"], other_operating_expenses_forecast: r["[OtherOpexForecast]"],
+          utilisation_budget: r["[UtilisationBudget]"], headcount_budget: r["[HeadcountBudget]"], daily_rate_budget: r["[DailyRateBudget]"],
+        };
+      }).filter(function (r) { return r.month; });
+    }
+    function parseEmployeeRosterRows(rows) {
+      return rows.map(function (r) {
+        return {
+          userId: r["[UserId]"], Omnia_Company: r["[OmniaCompany]"],
+          role_title: r["[RoleTitle]"], role_code: r["[RoleCode]"], role_group: r["[RoleGroup]"],
+          employment_type: r["[EmploymentType]"], business_unit: r["[BusinessUnit]"], location: r["[Location]"],
+          employment_start_date: r["[EmploymentStartDate]"], termination_date: r["[TerminationDate]"], tenure: r["[Tenure]"],
+        };
+      });
+    }
+    function parseRefProjectsRows(rows) {
+      return rows.map(function (r) {
+        return {
+          Project_Code: r["[ProjectCode]"], Project_Name: r["[ProjectName]"],
+          Start_Date: r["[StartDate]"], End_Date: r["[EndDate]"],
+          Client: r["[Client]"], Industry: r["[Industry]"], Omnia_Company: r["[OmniaCompany]"],
         };
       });
     }
@@ -2964,6 +3092,262 @@
       return note + allianceCardsHtml + certificationsSectionHtml;
     }
 
+    // ---- Projects page ----
+    var PROJECT_STATUS_COLORS = { 'New': 'var(--oc-mint-deep)', 'Active': 'var(--oc-mid-teal)', 'Rolled off': 'var(--oc-coral)', 'Inactive': '#a8b8b8' };
+    var PROJECTS_STATUS_FILTER_OPTIONS = [{ key: 'all', label: 'All' }, { key: 'New', label: 'New' }, { key: 'Active', label: 'Active' }, { key: 'Rolled off', label: 'Rolled off' }];
+    function refProjectLookup() {
+      var m = {};
+      (RAW.refProjects || []).forEach(function (r) { if (r.Project_Name) m[r.Project_Name] = r; });
+      return m;
+    }
+    function renderProjectsPage() {
+      var b = periodBounds();
+      var cardFactRows = cardPeriodRows(RAW.unifiedFact || [], 'month_date', 'entity');
+      var cmpFactRows = cardComparisonRows(RAW.unifiedFact || [], 'month_date', 'entity');
+      var factAll = (RAW.unifiedFact || []).filter(function (r) { return entityMatches(r.entity); });
+      var refLookup = refProjectLookup();
+      var haveRefData = (RAW.refProjects || []).length > 0;
+
+      var revByProject = groupSum(cardFactRows, 'project_name', 'total_revenue');
+      var cmpRevByProject = toValueMap(groupSum(cmpFactRows, 'project_name', 'total_revenue'));
+      var clientByProject = {};
+      cardFactRows.forEach(function (r) { if (r.project_name && !clientByProject[r.project_name]) clientByProject[r.project_name] = r.client_name; });
+      var streamByProject = {};
+      cardFactRows.forEach(function (r) { if (r.project_name && !streamByProject[r.project_name]) streamByProject[r.project_name] = r.project_stream; });
+
+      var cur = b ? b.end : currentMonthWithData();
+      var periodStart = cur, periodEnd = addMonths(cur, 1);
+      var projectRows = revByProject.map(function (r) {
+        var ref = refLookup[r.label];
+        var status = haveRefData ? classifyProjectStatus(ref, periodStart, periodEnd, r.value) : (r.value > 0 ? 'Active' : 'Inactive');
+        return { name: r.label, client: clientByProject[r.label] || 'Unknown', stream: streamByProject[r.label] || 'Unknown', revenue: r.value, cmpRevenue: cmpRevByProject[r.label] || 0, status: status };
+      }).sort(function (a, b) { return b.revenue - a.revenue; });
+
+      if (!STATE.projectsStatusFilter) STATE.projectsStatusFilter = 'all';
+      var filteredRows = STATE.projectsStatusFilter === 'all' ? projectRows : projectRows.filter(function (r) { return r.status === STATE.projectsStatusFilter; });
+
+      var newCount = projectRows.filter(function (r) { return r.status === 'New'; }).length;
+      var activeCount = projectRows.filter(function (r) { return r.status === 'Active' || r.status === 'New'; }).length;
+      var rolledOffCount = projectRows.filter(function (r) { return r.status === 'Rolled off'; }).length;
+      var totalRevenue = projectRows.reduce(function (s, r) { return s + r.revenue; }, 0);
+
+      var cardsHtml = '<section class="oc-kpi-grid">' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Active projects</div><div class="oc-kpi-value">' + activeCount + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">New projects</div><div class="oc-kpi-value">' + newCount + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Rolled off</div><div class="oc-kpi-value">' + rolledOffCount + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Total revenue</div><div class="oc-kpi-value">' + fmtCurrency(totalRevenue) + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div></section>';
+
+      var refNote = haveRefData ? '' : '<div class="oc-note" style="margin-bottom:16px; border-left:3px solid var(--oc-coral); padding-left:12px; background:#fff;">&#9888; Project lifecycle status (New / Rolled off) needs the data_ref_projects query, which is new and not yet verified against the live semantic model — showing revenue-based Active/Inactive only.</div>';
+
+      registerDownload('projectsList', 'projects-' + fileSlug() + '.csv', ['Project', 'Client', 'Stream', 'Status', 'Revenue', COMPARE_PREFIX[STATE.compareBasis]],
+        projectRows.map(function (r) { return [r.name, r.client, r.stream, r.status, r.revenue.toFixed(2), r.cmpRevenue.toFixed(2)]; }));
+
+      var tableRows = filteredRows.length ? filteredRows.map(function (r) {
+        var deltaPct = r.cmpRevenue ? ((r.revenue - r.cmpRevenue) / r.cmpRevenue) * 100 : null;
+        var deltaHtml = deltaPct != null ? '<span class="oc-badge ' + (deltaPct > 0 ? 'up' : deltaPct < 0 ? 'down' : 'neutral') + '">' + fmtDelta(deltaPct) + '</span>' : '<span class="oc-caption">—</span>';
+        return '<div style="display:grid; grid-template-columns:1.6fr 1.1fr 1fr 0.8fr 0.9fr; gap:8px; padding:11px 10px; border-bottom:1px solid var(--rule); align-items:center;">' +
+          '<div><div style="font-size:13.5px; font-weight:600;">' + escHtml(r.name) + '</div><div style="font-size:11.5px; color:var(--fg3);">' + escHtml(r.stream) + '</div></div>' +
+          '<div style="font-size:12.5px; color:var(--fg2);">' + escHtml(r.client) + '</div>' +
+          '<div style="font-size:13.5px; font-weight:700;">' + fmtCurrency(r.revenue) + '</div>' +
+          '<div>' + deltaHtml + '</div>' +
+          '<div><span class="oc-badge" style="background:' + PROJECT_STATUS_COLORS[r.status] + '1a; color:' + PROJECT_STATUS_COLORS[r.status] + ';">' + r.status + '</span></div></div>';
+      }).join('') : '<div class="oc-caption" style="padding:16px 0; text-align:center;">No projects match this filter.</div>';
+
+      var listSection = '<section class="oc-panel">' + panelHeadWithTools('Projects', 'projectsList') +
+        '<div class="oc-panel-sub">' + cardPeriodLabelText() + ' · ' + filteredRows.length + ' of ' + projectRows.length + ' projects</div>' +
+        '<div style="margin-bottom:12px;">' + renderPillToggle(PROJECTS_STATUS_FILTER_OPTIONS, 'projectsStatusFilter') + '</div>' +
+        '<div style="display:grid; grid-template-columns:1.6fr 1.1fr 1fr 0.8fr 0.9fr; gap:8px; padding:0 10px 8px; font-size:11px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:var(--fg3); border-bottom:1px solid var(--rule);"><div>Project</div><div>Client</div><div>Revenue</div><div>' + COMPARE_PREFIX[STATE.compareBasis] + '</div><div>Status</div></div>' +
+        tableRows + '</section>';
+
+      var marginNote = renderNotReadyPanel('Gross margin by project', 'Needs gross_margin and project_code on the data_powerbi_unified_fact query, which are not yet included in this app\'s query to avoid regressing already-working pages.');
+
+      return refNote + cardsHtml + listSection + marginNote;
+    }
+
+    // ---- Employees page ----
+    var EMPLOYEES_BREAKDOWN_OPTIONS = [{ key: 'business_unit', label: 'Business unit' }, { key: 'role_group', label: 'Role group' }, { key: 'location', label: 'Location' }];
+    function activeEmployeeRows(asOfDate) {
+      return (RAW.employeeRoster || []).filter(function (r) { return entityMatches(r.Omnia_Company); }).filter(function (r) {
+        var start = r.employment_start_date ? new Date(r.employment_start_date) : null;
+        var term = r.termination_date ? new Date(r.termination_date) : null;
+        if (start && start > asOfDate) return false;
+        if (term && term <= asOfDate) return false;
+        return true;
+      });
+    }
+    function renderEmployeesPage() {
+      var haveRosterData = (RAW.employeeRoster || []).length > 0;
+      if (!haveRosterData) return renderNotReadyPanel('Employees', 'No data_employee_roster rows found — this page reads from the data_employee_roster query, which is new and not yet verified against the live semantic model.');
+
+      var b = periodBounds();
+      var cur = b ? b.end : currentMonthWithData();
+      var cmpTarget = cardComparisonTargetMonth();
+      var currentHeadcount = activeEmployeeRows(addMonths(cur, 1)).length;
+      var cmpHeadcount = cmpTarget ? activeEmployeeRows(addMonths(cmpTarget, 1)).length : null;
+      var cardPl = plSummaryForMonths(cardMonths());
+      var headcountTarget = cardPl ? cardPl.headcountBudget : null;
+
+      var newHires = (RAW.employeeRoster || []).filter(function (r) { return entityMatches(r.Omnia_Company); }).filter(function (r) {
+        var start = r.employment_start_date ? new Date(r.employment_start_date) : null;
+        return start && cardMonths().some(function (m) { return start >= m && start < addMonths(m, 1); });
+      }).length;
+      var departures = (RAW.employeeRoster || []).filter(function (r) { return entityMatches(r.Omnia_Company); }).filter(function (r) {
+        var term = r.termination_date ? new Date(r.termination_date) : null;
+        return term && cardMonths().some(function (m) { return term >= m && term < addMonths(m, 1); });
+      }).length;
+
+      function badgeE(cur, cmp) {
+        if (cur == null || !cmp) return '';
+        var diff = cur - cmp, d = (diff / cmp) * 100;
+        return '<span class="oc-badge ' + (d > 0 ? 'up' : d < 0 ? 'down' : 'neutral') + '">' + signedCount(diff, 0) + ' (' + fmtDelta(d) + ') ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase() + '</span>';
+      }
+
+      var cardsHtml = '<section class="oc-kpi-grid">' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Headcount</div><div class="oc-kpi-value">' + currentHeadcount + '</div><div class="oc-kpi-delta-row">' + badgeE(currentHeadcount, cmpHeadcount) + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + (headcountTarget != null ? ' · target ' + Math.round(headcountTarget) : '') + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">New hires</div><div class="oc-kpi-value">' + newHires + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Departures</div><div class="oc-kpi-value">' + departures + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div></section>';
+
+      var b2 = periodBounds();
+      var headcountSeries = b2 ? b2.months.map(function (m) { return activeEmployeeRows(addMonths(m, 1)).length; }) : [];
+      registerDownload('headcountTrend', 'headcount-trend-' + fileSlug() + '.csv', ['Month', 'Headcount'], (b2 ? b2.months : []).map(function (m, i) { return [monthYearLabel(m), headcountSeries[i]]; }));
+      var trendHtml = '<section class="oc-panel">' + panelHeadWithTools('Headcount trend', 'headcountTrend') +
+        (b2 ? renderSparklineCard({ label: '', color: 'var(--oc-deep-teal)', fmt: function (v) { return Math.round(v); } }, headcountSeries, b2.months) : '') + '</section>';
+
+      if (!STATE.employeesBreakdown) STATE.employeesBreakdown = 'business_unit';
+      var breakdownField = STATE.employeesBreakdown;
+      var currentRoster = activeEmployeeRows(addMonths(cur, 1));
+      var breakdownRows = groupCount(currentRoster, breakdownField);
+      registerDownload('employeesBreakdown', 'employees-by-' + breakdownField + '-' + fileSlug() + '.csv', ['Category', 'Headcount'], breakdownRows.map(function (r) { return [r.label, r.value]; }));
+      var breakdownHtml = '<section class="oc-panel">' + panelHeadWithToolsAndExtra('Headcount breakdown', 'employeesBreakdown', renderPillToggle(EMPLOYEES_BREAKDOWN_OPTIONS, 'employeesBreakdown')) +
+        '<div class="oc-panel-sub">' + cardPeriodLabelText() + '</div>' + renderBarList(breakdownRows, function (v) { return Math.round(v) + (v === 1 ? ' person' : ' people'); }) + '</section>';
+
+      return cardsHtml + trendHtml + breakdownHtml;
+    }
+
+    // ---- Margins page ----
+    function invoicedDaysForMonths(monthsSet) {
+      var rows = rowsForMonths(RAW.utilisation || [], 'month', 'Omnia_Company', monthsSet);
+      return rows.reduce(function (s, r) { return s + (Number(r.invoiced_days) || 0); }, 0);
+    }
+    var MARGINS_TREND_METRIC_OPTIONS = [{ key: 'ebitda', label: 'EBITDA' }, { key: 'grossMargin', label: 'Gross margin' }];
+    function renderMarginsPage() {
+      var cardPl = plSummaryForMonths(cardMonths());
+      var avgDailyMarginGm = cardPl ? cardPl.gpActual : null;
+      var avgDailyMarginDays = invoicedDaysForMonths(cardMonths());
+      var avgDailyMargin = (avgDailyMarginGm != null && avgDailyMarginDays) ? avgDailyMarginGm / avgDailyMarginDays : null;
+      var overallMarginActual = cardPl ? cardPl.grossMarginPctActual : null;
+      var cmpPl = plSummaryForMonths(cardComparisonMonths());
+      var cmpAvgDailyMarginGm = cmpPl ? cmpPl.gpActual : null;
+      var cmpAvgDailyMarginDays = invoicedDaysForMonths(cardComparisonMonths());
+      var cmpAvgDailyMargin = (cmpAvgDailyMarginGm != null && cmpAvgDailyMarginDays) ? cmpAvgDailyMarginGm / cmpAvgDailyMarginDays : null;
+
+      function pctBadgeM(cur, cmp, valueFmt) {
+        if (cur == null || !cmp) return '';
+        valueFmt = valueFmt || signedCurrency;
+        var diff = cur - cmp, d = (diff / cmp) * 100;
+        return '<span class="oc-badge ' + (d > 0 ? 'up' : d < 0 ? 'down' : 'neutral') + '">' + valueFmt(diff) + ' (' + fmtDelta(d) + ') ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase() + '</span>';
+      }
+      function gapBadgeM(cur, target, suffix, lowerIsBetter, valueFmt) {
+        if (cur == null || !target) return '';
+        valueFmt = valueFmt || signedPts;
+        var diff = cur - target, d = (diff / target) * 100;
+        var good = lowerIsBetter ? d <= 0 : d >= 0;
+        return '<span class="oc-badge ' + (good ? 'up' : 'down') + '">' + valueFmt(diff) + ' (' + fmtDelta(d) + ') ' + suffix + '</span>';
+      }
+      var avgDailyMarginBadge = pctBadgeM(avgDailyMargin, cmpAvgDailyMargin);
+      var overallMarginBadge = pctBadgeM(cardPl ? cardPl.gpActual : null, cmpPl ? cmpPl.gpActual : null);
+      var ebitdaMarginBadge = pctBadgeM(cardPl ? cardPl.ebitdaPctActual : null, cmpPl ? cmpPl.ebitdaPctActual : null, signedPts);
+
+      var b = periodBounds();
+      if (!STATE.marginsTrendMetric) STATE.marginsTrendMetric = 'ebitda';
+      var showingEbitdaTrend = STATE.marginsTrendMetric === 'ebitda';
+      var ebitdaActualSeries = b ? b.months.map(function (m) { var p = plSummaryForMonths([m]); return p ? p.ebitdaActual : null; }) : [];
+      var ebitdaTargetSeries = b ? b.months.map(function (m) { var p = plSummaryForMonths([m]); return p ? p.ebitdaBudget : null; }) : [];
+      var marginActualSeries = b ? b.months.map(function (m) { var p = plSummaryForMonths([m]); return p ? p.gpActual : null; }) : [];
+      var marginBudgetSeries = b ? b.months.map(function (m) { var p = plSummaryForMonths([m]); return p ? p.gpBudget : null; }) : [];
+      var marginForecastSeries = b ? b.months.map(function (m) { var p = plSummaryForMonths([m]); return p ? p.gpForecast : null; }) : [];
+      var marginsTrendTitle = showingEbitdaTrend ? 'EBITDA' : 'Gross margin';
+      var marginsTrendExtraPill = renderPillToggle(MARGINS_TREND_METRIC_OPTIONS, 'marginsTrendMetric');
+
+      registerDownload('marginsTrend', (showingEbitdaTrend ? 'ebitda-trend-' : 'margin-trend-') + fileSlug() + '.csv',
+        showingEbitdaTrend ? ['Month', 'EBITDA actual', 'EBITDA target'] : ['Month', 'Margin actual', 'Margin target', 'Margin forecast'],
+        (b ? b.months : []).map(function (m, i) {
+          return showingEbitdaTrend
+            ? [monthYearLabel(m), ebitdaActualSeries[i] != null ? ebitdaActualSeries[i].toFixed(2) : '', ebitdaTargetSeries[i] != null ? ebitdaTargetSeries[i].toFixed(2) : '']
+            : [monthYearLabel(m), marginActualSeries[i] != null ? marginActualSeries[i].toFixed(2) : '', marginBudgetSeries[i] != null ? marginBudgetSeries[i].toFixed(2) : '', marginForecastSeries[i] != null ? marginForecastSeries[i].toFixed(2) : ''];
+        }));
+
+      var cardsHtml = '<section class="oc-kpi-grid">' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">EBITDA</div><div class="oc-kpi-value">' + (cardPl && cardPl.ebitdaActual != null ? fmtCurrency(cardPl.ebitdaActual) : '—') + (cardPl && cardPl.ebitdaPctActual != null ? ' <span style="font-size:0.6em; font-weight:600; color:var(--fg3);">(' + fmtPct(cardPl.ebitdaPctActual) + ')</span>' : '') + '</div><div class="oc-kpi-delta-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><div>' + gapBadgeM(cardPl ? cardPl.ebitdaPctActual : null, cardPl ? cardPl.ebitdaPctBudget : null, 'vs target', false) + '</div><div>' + ebitdaMarginBadge + '</div></div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Gross margin</div><div class="oc-kpi-value">' + (cardPl && cardPl.gpActual != null ? fmtCurrency(cardPl.gpActual) : '—') + (overallMarginActual != null ? ' <span style="font-size:0.6em; font-weight:600; color:var(--fg3);">(' + fmtPct(overallMarginActual) + ')</span>' : '') + '</div><div class="oc-kpi-delta-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><div>' + gapBadgeM(overallMarginActual, cardPl ? cardPl.grossMarginPctBudget : null, 'vs target', false) + '</div><div>' + overallMarginBadge + '</div></div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Avg daily margin</div><div class="oc-kpi-value">' + (avgDailyMargin != null ? fmtCurrency(avgDailyMargin) : '—') + '</div><div class="oc-kpi-delta-row">' + avgDailyMarginBadge + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div></section>';
+
+      var plNote = '<div class="oc-note" style="margin-bottom:16px; border-left:3px solid var(--oc-coral); padding-left:12px; background:#fff;">&#9888; This page reads from the data_pl query, which is new and not yet verified against the live semantic model — figures show "—" until that\'s confirmed working.</div>';
+
+      return plNote + cardsHtml +
+        '<section class="oc-panel">' + panelHeadWithToolsAndExtra(marginsTrendTitle, 'marginsTrend', marginsTrendExtraPill) +
+          (b ? (showingEbitdaTrend
+            ? renderBarTrendChart({ label: '', color: '#D98C4A', fmt: fmtCurrencyCompact, targetLabel: 'Target' }, ebitdaActualSeries, b.months, ebitdaTargetSeries)
+            : renderBarTrendChart({ label: '', color: 'var(--oc-mid-teal)', fmt: fmtCurrencyCompact, targetLabel: 'Target' }, marginActualSeries, b.months, marginBudgetSeries, null, marginForecastSeries, 'Forecast')) : '') +
+        '</section>';
+    }
+
+    // ---- Cost page ----
+    function plCategoryVal(p, key, field) {
+      if (!p || !p.categories) return null;
+      var cat = p.categories.filter(function (c) { return c.key === key; })[0];
+      return cat ? cat[field] : null;
+    }
+    var COST_METRIC_OPTIONS = [{ key: 'directCosts', label: 'Direct costs' }, { key: 'indirectCosts', label: 'Indirect costs' }, { key: 'employeeBenefits', label: 'Employee benefits' }, { key: 'opex', label: 'Opex' }];
+    function renderCostPage() {
+      var b = periodBounds();
+      var cardPl = plSummaryForMonths(cardMonths());
+      var cmpPl = plSummaryForMonths(cardComparisonMonths());
+      if (!cardPl) return renderNotReadyPanel('Cost', 'No data_pl rows found for ' + cardPeriodLabelText() + ' yet — this page reads from the data_pl query, which is new and not yet verified against the live semantic model.');
+
+      function pctBadgeC(cur, cmp, suffix) {
+        if (cur == null || !cmp) return '';
+        var diff = cur - cmp, d = (diff / cmp) * 100;
+        return '<span class="oc-badge ' + (d > 0 ? 'up' : d < 0 ? 'down' : 'neutral') + '">' + signedCurrency(diff) + ' (' + fmtDelta(d) + ') ' + suffix + '</span>';
+      }
+      var cardsHtml = '<section class="oc-kpi-grid">' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Direct costs</div><div class="oc-kpi-value">' + (cardPl.directCostsActual != null ? fmtCurrency(cardPl.directCostsActual) : '—') + '</div><div class="oc-kpi-delta-row">' + pctBadgeC(cardPl.directCostsActual, cmpPl ? cmpPl.directCostsActual : null, COMPARE_PREFIX[STATE.compareBasis].toLowerCase()) + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Indirect costs</div><div class="oc-kpi-value">' + (plCategoryVal(cardPl, 'wages_salaries_indirect', 'actual') != null ? fmtCurrency(plCategoryVal(cardPl, 'wages_salaries_indirect', 'actual')) : '—') + '</div><div class="oc-kpi-delta-row">' + pctBadgeC(plCategoryVal(cardPl, 'wages_salaries_indirect', 'actual'), plCategoryVal(cmpPl, 'wages_salaries_indirect', 'actual'), COMPARE_PREFIX[STATE.compareBasis].toLowerCase()) + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Employee benefits</div><div class="oc-kpi-value">' + (plCategoryVal(cardPl, 'employee_benefits', 'actual') != null ? fmtCurrency(plCategoryVal(cardPl, 'employee_benefits', 'actual')) : '—') + '</div><div class="oc-kpi-delta-row">' + pctBadgeC(plCategoryVal(cardPl, 'employee_benefits', 'actual'), plCategoryVal(cmpPl, 'employee_benefits', 'actual'), COMPARE_PREFIX[STATE.compareBasis].toLowerCase()) + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Opex</div><div class="oc-kpi-value">' + fmtCurrency(cardPl.opexActual) + '</div><div class="oc-kpi-delta-row">' + pctBadgeC(cardPl.opexActual, cmpPl ? cmpPl.opexActual : null, COMPARE_PREFIX[STATE.compareBasis].toLowerCase()) + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div></section>';
+
+      if (!STATE.costMetricView) STATE.costMetricView = 'directCosts';
+      var costMetricConfig = {
+        directCosts: { title: 'Direct costs', color: 'var(--oc-mint-deep)', fmt: fmtCurrencyCompact, target2Label: 'Forecast', actual: function (p) { return p.directCostsActual; }, target2: function (p) { return p.directCostsForecast; } },
+        indirectCosts: { title: 'Indirect costs', color: '#6B5B95', fmt: fmtCurrencyCompact, target2Label: 'Forecast', actual: function (p) { return plCategoryVal(p, 'wages_salaries_indirect', 'actual'); }, target2: function (p) { return plCategoryVal(p, 'wages_salaries_indirect', 'forecast'); } },
+        employeeBenefits: { title: 'Employee benefits', color: '#B76E79', fmt: fmtCurrencyCompact, target2Label: 'Forecast', actual: function (p) { return plCategoryVal(p, 'employee_benefits', 'actual'); }, target2: function (p) { return plCategoryVal(p, 'employee_benefits', 'forecast'); } },
+        opex: { title: 'Opex', color: 'var(--oc-deep-teal)', fmt: fmtCurrencyCompact, target2Label: 'Forecast', actual: function (p) { return p.opexActual; }, target2: function (p) { return p.opexForecast; } },
+      };
+      var costCfg = costMetricConfig[STATE.costMetricView];
+      var costActualSeries = b ? b.months.map(function (m) { var p = plSummaryForMonths([m]); return p ? costCfg.actual(p) : null; }) : [];
+      var costTarget2Series = b ? b.months.map(function (m) { var p = plSummaryForMonths([m]); return p ? costCfg.target2(p) : null; }) : [];
+      registerDownload('costMetricTrend', 'cost-' + STATE.costMetricView + '-trend-' + fileSlug() + '.csv', ['Month', 'Actual', costCfg.target2Label],
+        (b ? b.months : []).map(function (m, i) { return [monthYearLabel(m), costActualSeries[i] != null ? costActualSeries[i].toFixed(2) : '', costTarget2Series[i] != null ? costTarget2Series[i].toFixed(2) : '']; }));
+      var costExtraPill = renderPillToggle(COST_METRIC_OPTIONS, 'costMetricView');
+      var costTrendHtml = '<section class="oc-panel">' + panelHeadWithToolsAndExtra(costCfg.title, 'costMetricTrend', costExtraPill) +
+        (b ? renderBarTrendChart({ label: '', color: costCfg.color, fmt: costCfg.fmt, targetLabel: costCfg.targetLabel }, costActualSeries, b.months, null, null, costTarget2Series, costCfg.target2Label) : '') + '</section>';
+
+      var categoryRowsAll = cardPl.categories;
+      var categoryRowsActual = categoryRowsAll.map(function (c) { return { label: c.label, value: c.actual || 0 }; }).sort(function (a, b) { return b.value - a.value; });
+      var categoryCmpMap = {};
+      categoryRowsAll.forEach(function (c) { if (c.forecast != null) categoryCmpMap[c.label] = c.forecast; });
+      var cmpPlForCategory = plSummaryForMonths(cardComparisonMonths());
+      var categoryCmp2Map = {};
+      if (cmpPlForCategory) cmpPlForCategory.categories.forEach(function (c) { if (c.actual != null) categoryCmp2Map[c.label] = c.actual; });
+      registerDownload('costByCategory', 'opex-by-category-' + fileSlug() + '.csv', ['Category', 'Actual', 'Forecast', COMPARE_PREFIX[STATE.compareBasis]],
+        categoryRowsAll.map(function (c) { return [c.label, c.actual != null ? c.actual.toFixed(2) : '', c.forecast != null ? c.forecast.toFixed(2) : '', categoryCmp2Map[c.label] != null ? categoryCmp2Map[c.label].toFixed(2) : '']; }));
+      var categoryHtml = '<section class="oc-panel"><h3 class="oc-panel-title">Opex by category</h3><div class="oc-panel-sub" style="margin-bottom:12px;">' + cardPeriodLabelText() + '</div>' +
+        renderBarList(categoryRowsActual, fmtCurrency, categoryCmpMap, '#D98C4A', 'Forecast', categoryCmp2Map, COMPARE_PREFIX[STATE.compareBasis], true) + '</section>';
+
+      var plDataNote = '<div class="oc-note" style="margin-bottom:16px; border-left:3px solid var(--oc-coral); padding-left:12px; background:#fff;">&#9888; This page reads from the data_pl query, which is new and not yet verified against the live semantic model.</div>';
+      return plDataNote + cardsHtml + costTrendHtml + categoryHtml;
+    }
+
     // ---- Page dispatch (Phase 2 will replace each remaining placeholder
     // with a real ported render*Page function, one nav item at a time) ----
     function goToPage(pageKey) {
@@ -2986,6 +3370,14 @@
         el.innerHTML = renderUtilisationPage();
       } else if (STATE.page === 'certifications') {
         el.innerHTML = renderCertificationsPage();
+      } else if (STATE.page === 'projects') {
+        el.innerHTML = renderProjectsPage();
+      } else if (STATE.page === 'employees') {
+        el.innerHTML = renderEmployeesPage();
+      } else if (STATE.page === 'margins') {
+        el.innerHTML = renderMarginsPage();
+      } else if (STATE.page === 'cost') {
+        el.innerHTML = renderCostPage();
       } else {
         var navItem = NAV_ITEMS.filter(function (n) { return n.key === STATE.page; })[0];
         el.innerHTML = renderPlaceholderPage(navItem ? navItem.label : STATE.page);
@@ -3036,7 +3428,7 @@
       document.getElementById("oc-placeholder").style.display = "none";
       document.getElementById("oc-loading").style.display = "block";
       var results = await executeDaxQueries(token, [
-        Q_REVENUE_TARGET, Q_PROJECT_FACT, Q_DEALS, Q_UTILISATION, Q_CERTIFICATIONS,
+        Q_REVENUE_TARGET, Q_PROJECT_FACT, Q_DEALS, Q_UTILISATION, Q_CERTIFICATIONS, Q_PL, Q_EMPLOYEE_ROSTER, Q_REF_PROJECTS,
       ]);
       var data = {
         revenueTarget: parseRevenueRows(results[0]),
@@ -3044,9 +3436,9 @@
         hubspotDeals: parseDealRows(results[2]),
         utilisation: parseUtilisationRows(results[3]),
         certifications: parseCertRows(results[4]),
-        pl: [],
-        employeeRoster: [],
-        refProjects: [],
+        pl: parsePlRows(results[5]),
+        employeeRoster: parseEmployeeRosterRows(results[6]),
+        refProjects: parseRefProjectsRows(results[7]),
       };
       document.getElementById("oc-loading").style.display = "none";
       document.getElementById("oc-content").style.display = "block";
