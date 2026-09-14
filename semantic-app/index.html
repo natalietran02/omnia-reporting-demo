@@ -2591,6 +2591,379 @@
         renderClientChurnPanel() + renderClientDeepDivePanel();
     }
 
+    // ---- Deals page ----
+    var DEALS_STATUS_OPTIONS = [{ key: 'open', label: 'Open' }, { key: 'won', label: 'Won' }];
+    var OPCO_FORECAST_COLORS = ['var(--oc-coral)', 'var(--oc-mint-deep)', 'var(--oc-mid-teal)', 'var(--oc-deep-teal)', '#F2C879', '#B79FD9', '#7a8f8f'];
+    function groupCount(rows, keyField) {
+      var map = {};
+      rows.forEach(function (r) { var k = r[keyField] || 'Unknown'; map[k] = (map[k] || 0) + 1; });
+      return Object.keys(map).map(function (k) { return { label: k, value: map[k] }; }).sort(function (a, b) { return b.value - a.value; });
+    }
+
+    function renderDealsPage() {
+      var deals = dealsForEntity();
+      var open = deals.filter(function (d) { return !isClosedStage(d.Deal_Stage); });
+      var closedInPeriod = currentPeriodRows(deals, 'Close_Date', null);
+      var cardClosed = cardPeriodRows(deals, 'Close_Date', null);
+      var wonInPeriod = cardClosed.filter(function (d) { return isWonStage(d.Deal_Stage); });
+      var lostInPeriod = cardClosed.filter(function (d) { return isLostStage(d.Deal_Stage); });
+      var wonAmount = sumAmount(wonInPeriod);
+      var closedCount = wonInPeriod.length + lostInPeriod.length;
+      var conversionRate = closedCount ? (wonInPeriod.length / closedCount) * 100 : null;
+      var avgDealSize = wonInPeriod.length ? wonAmount / wonInPeriod.length : null;
+      var openPipelineValue = sumAmount(open);
+
+      var cmpClosed = cardComparisonRows(deals, 'Close_Date', null);
+      var cmpWon = cmpClosed.filter(function (d) { return isWonStage(d.Deal_Stage); });
+      var cmpLost = cmpClosed.filter(function (d) { return isLostStage(d.Deal_Stage); });
+      var cmpWonAmount = sumAmount(cmpWon);
+      var cmpConversion = (cmpWon.length + cmpLost.length) ? (cmpWon.length / (cmpWon.length + cmpLost.length)) * 100 : null;
+      var cmpAvgDealSize = cmpWon.length ? sumAmount(cmpWon) / cmpWon.length : null;
+
+      function badge(cur, cmp, isPts) {
+        if (cur == null || cmp == null || !cmp) return '';
+        var diff = cur - cmp;
+        if (isPts) { var relPct = cmp ? (diff / cmp) * 100 : null; return '<span class="oc-badge ' + (diff > 0 ? 'up' : diff < 0 ? 'down' : 'neutral') + '" style="margin-top:4px; display:inline-block;">' + signedPts(diff) + (relPct != null ? ' (' + fmtDelta(relPct) + ')' : '') + ' ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase() + '</span>'; }
+        var d = (diff / cmp) * 100;
+        return '<span class="oc-badge ' + (d > 0 ? 'up' : d < 0 ? 'down' : 'neutral') + '" style="margin-top:4px; display:inline-block;">' + signedCurrency(diff) + ' (' + fmtDelta(d) + ') ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase() + '</span>';
+      }
+
+      var FUNNEL_STAGE_ORDER = ['Initiated', 'Pain/Gain Defined', 'Qualified', 'Co-Designed', 'Presented', 'Enabled Decision', 'Closed Won', 'Closed Lost'];
+      var funnelValueByStage = toValueMap(groupSum(open, 'Deal_Stage', 'Amount'));
+      var funnelCounts = {};
+      open.forEach(function (d) { var k = d.Deal_Stage || 'Unknown'; funnelCounts[k] = (funnelCounts[k] || 0) + 1; });
+      funnelValueByStage['Closed Won'] = sumAmount(wonInPeriod);
+      funnelValueByStage['Closed Lost'] = sumAmount(lostInPeriod);
+      funnelCounts['Closed Won'] = wonInPeriod.length;
+      funnelCounts['Closed Lost'] = lostInPeriod.length;
+      var matchedStages = FUNNEL_STAGE_ORDER.filter(function (s) { return funnelValueByStage.hasOwnProperty(s); });
+      var extraStages = Object.keys(funnelValueByStage).filter(function (s) { return FUNNEL_STAGE_ORDER.indexOf(s) === -1; }).sort(function (a, b) { return funnelValueByStage[b] - funnelValueByStage[a]; });
+      var funnelRows = matchedStages.concat(extraStages).map(function (s) { return { label: s, value: funnelValueByStage[s] }; });
+      var funnelMax = Math.max.apply(null, funnelRows.map(function (r) { return r.value; }).concat([1]));
+      var FUNNEL_COLORS = ['var(--oc-deep-teal)', 'var(--oc-mid-teal)', 'var(--oc-coral)', 'var(--oc-mint-deep)', '#7a8f8f', '#a8b8b8', 'var(--oc-mint-deep)', 'var(--oc-coral)'];
+
+      var b = periodBounds();
+      var wonTrendSeries = b ? b.months.map(function (m) { var rows = rowsForMonths(deals, 'Close_Date', null, [m]).filter(function (d) { return isWonStage(d.Deal_Stage); }); return rows.length ? sumAmount(rows) : 0; }) : [];
+
+      var PROBABILITY_BUCKETS = [{ label: 'Low (0–25%)', min: 0, max: 0.25 }, { label: 'Medium (25–50%)', min: 0.25, max: 0.5 }, { label: 'High (50–75%)', min: 0.5, max: 0.75 }, { label: 'Very High (75–100%)', min: 0.75, max: 1.0001 }];
+      var confidenceRows = PROBABILITY_BUCKETS.map(function (bucket) {
+        var rows = open.filter(function (d) { var p = Number(d.Deal_Probability); return !isNaN(p) && p >= bucket.min && p < bucket.max; });
+        return { label: bucket.label, value: sumAmount(rows), count: rows.length };
+      });
+
+      var listSource = STATE.dealsTopStatus === 'won' ? closedInPeriod.filter(function (d) { return isWonStage(d.Deal_Stage); }) : open;
+      var sortedList = listSource.slice().sort(function (a, b) { return (Number(b.Amount) || 0) - (Number(a.Amount) || 0); });
+      var rangedDeals = sliceForRange(sortedList, 'dealsTopListRange', 50);
+      var rangedDealsStartIdx = (function () { var buckets = rangeBucketsFor(sortedList.length, 50); return (buckets.filter(function (b) { return b.key === (STATE.dealsTopListRange || '1-10'); })[0] || buckets[0]).start; })();
+
+      registerDownload('dealsBreakdown', 'deals-breakdown-' + fileSlug() + '.csv', ['Company', 'Deal name', 'Stage', 'Close date', 'Amount'], sortedList.map(function (d) { return [d.Company || 'Unknown', d.Deal_Name || '', d.Deal_Stage || '', d.Close_Date || '', (Number(d.Amount) || 0).toFixed(2)]; }));
+
+      var kpiHtml = '<div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin-bottom:20px;">' +
+        '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Won amount</div><div style="font-size:20px; font-weight:800;">' + fmtCurrency(wonAmount) + '</div>' + badge(wonAmount, cmpWonAmount, false) + '<div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Conversion rate</div><div style="font-size:20px; font-weight:800;">' + (conversionRate != null ? fmtPct(conversionRate) : '—') + '</div>' + badge(conversionRate, cmpConversion, true) + '<div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Avg deal size won</div><div style="font-size:20px; font-weight:800;">' + (avgDealSize != null ? fmtCurrency(avgDealSize) : '—') + '</div>' + badge(avgDealSize, cmpAvgDealSize, false) + '<div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Open pipeline</div><div style="font-size:20px; font-weight:800;">' + fmtCurrency(openPipelineValue) + '</div><div class="oc-caption" style="margin-top:4px;">' + open.length + ' deals, all time</div></div></div>';
+
+      var funnelHtml = '<div class="oc-multiple-label" style="margin-bottom:2px;">Pipeline funnel · by stage</div><div class="oc-caption" style="margin-bottom:10px;">Open stages: all-time · Closed Won/Lost: ' + cardPeriodLabelText() + '</div><div style="display:flex; flex-direction:column; gap:10px;">' +
+        funnelRows.map(function (r, i) {
+          var widthPct = funnelMax ? Math.max(20, (r.value / funnelMax) * 100) : 20;
+          return '<div class="oc-funnel-row"><div class="oc-funnel-bar" style="width:' + widthPct.toFixed(1) + '%; background:' + FUNNEL_COLORS[i % FUNNEL_COLORS.length] + ';" title="' + escAttr(r.label) + ': ' + (funnelCounts[r.label] || 0) + ' deals · ' + fmtCurrency(r.value) + '"><div class="oc-funnel-title">' + escHtml(r.label) + '</div><div class="oc-funnel-sub">' + (funnelCounts[r.label] || 0) + ' deals · ' + fmtCurrency(r.value) + '</div></div></div>';
+        }).join('') + '</div>';
+
+      var wonTrendHtml = b ? renderSparklineCard({ label: 'Won revenue trend', color: 'var(--oc-coral)', fmt: fmtCurrencyCompact }, wonTrendSeries, b.months, null, null, true) : '';
+      var CONFIDENCE_BUCKET_COLORS = ['var(--oc-coral)', '#D98C4A', 'var(--oc-mint-deep)', 'var(--oc-deep-teal)'];
+      var confidenceMax = Math.max.apply(null, confidenceRows.map(function (r) { return r.value; }).concat([1]));
+      var confidenceHtml = '<div class="oc-multiple-label" style="margin-bottom:14px;">Open deal probability</div><div class="oc-barlist">' + confidenceRows.map(function (r, i) {
+        var pct = confidenceMax ? (r.value / confidenceMax) * 100 : 0;
+        return '<div class="oc-barlist-row"><div class="oc-barlist-head"><span class="oc-barlist-name">' + r.label + '</span><span class="oc-barlist-value">' + r.count + (r.count === 1 ? ' deal' : ' deals') + ' · ' + fmtCurrency(r.value) + '</span></div><div class="oc-barlist-track"><div class="oc-barlist-fill" style="width:' + pct.toFixed(1) + '%; background:' + CONFIDENCE_BUCKET_COLORS[i % CONFIDENCE_BUCKET_COLORS.length] + ';"></div></div></div>';
+      }).join('') + '</div>';
+
+      var listHtml = '<div class="oc-multiple-label" style="margin-bottom:10px;">Top deals</div>' +
+        '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">' + renderPillToggle(DEALS_STATUS_OPTIONS, 'dealsTopStatus') + rangePillsHtml('dealsTopListRange', sortedList.length, 50) + '</div>' +
+        '<div class="oc-caption" style="margin-bottom:8px;">Showing ' + rangedDeals.length + ' of ' + sortedList.length + ' ' + (STATE.dealsTopStatus === 'won' ? 'won deals, ' + periodLabelText() : 'open deals (all-time)') + '</div>' +
+        (rangedDeals.length ? rangedDeals.map(function (d, i) {
+          var closeDate = d.Close_Date ? new Date(d.Close_Date) : null;
+          var closeDateLabel = (closeDate && !isNaN(closeDate)) ? closeDate.toLocaleDateString('en-AU') : '—';
+          return '<div class="oc-deal-list-row"><div><span style="font-weight:600;">' + (rangedDealsStartIdx + i + 1) + '. ' + escHtml(d.Company || 'Unknown') + '</span><span style="color:var(--fg3);"> · ' + escHtml(d.Deal_Name || '') + '</span></div><div style="display:flex; gap:12px; align-items:center; flex-shrink:0;"><span style="color:var(--fg2); font-size:12px;">' + escHtml(d.Deal_Stage || '') + '</span><span style="color:var(--fg3); font-size:12px;">' + closeDateLabel + '</span><span style="font-weight:700;">' + fmtCurrency(Number(d.Amount) || 0) + '</span></div></div>';
+        }).join('') : '<div class="oc-caption" style="padding:16px 0; text-align:center;">No deals in this range</div>');
+
+      var breakdownSection = '<section class="oc-panel">' + panelHeadWithTools('Deals breakdown', 'dealsBreakdown') + kpiHtml +
+        '<div class="oc-analytics-grid"><div>' + wonTrendHtml + '</div><div>' + confidenceHtml + '</div><div style="grid-column:1 / -1;">' + funnelHtml + '</div></div>' +
+        '<div style="margin-top:28px;">' + listHtml + '</div></section>';
+
+      var wonCountP = wonInPeriod.length, lostCountP = lostInPeriod.length;
+      var wonShare = (wonCountP + lostCountP) ? (wonCountP / (wonCountP + lostCountP)) * 100 : 0;
+      var donutGradient = 'conic-gradient(var(--oc-deep-teal) 0% ' + wonShare.toFixed(1) + '%, var(--oc-coral) ' + wonShare.toFixed(1) + '% 100%)';
+      var byOpcoValue = groupSum(open, 'Omnia_Company', 'Amount');
+      var byOpcoCount = {};
+      open.forEach(function (d) { var k = d.Omnia_Company || 'Unknown'; byOpcoCount[k] = (byOpcoCount[k] || 0) + 1; });
+      var byOpcoCountRows = Object.keys(byOpcoCount).map(function (k) { return { label: k, value: byOpcoCount[k] }; }).sort(function (a, b) { return b.value - a.value; });
+      var stageSnapshot = groupSum(open, 'Deal_Stage', 'Amount').slice(0, 8);
+      var stageTotalCount = open.length || 1;
+      var stageSnapshotRows = stageSnapshot.map(function (r) { return { label: r.label, value: funnelCounts[r.label] || 0, pctOfTotal: ((funnelCounts[r.label] || 0) / stageTotalCount) * 100 }; });
+      var stalled = open.filter(function (d) {
+        if (d.Is_Stalled != null && d.Is_Stalled !== '') { var v = String(d.Is_Stalled).toLowerCase(); return v === 'true' || v === 'yes' || v === '1'; }
+        var ds = daysSince(d.Last_Updated);
+        return ds != null && ds > 30;
+      });
+      var stalledByStage = {};
+      stalled.forEach(function (d) { var k = d.Deal_Stage || 'Unknown'; stalledByStage[k] = (stalledByStage[k] || 0) + 1; });
+      var stalledRows = Object.keys(stalledByStage).map(function (k) { return { label: k, value: stalledByStage[k] }; }).sort(function (a, b) { return b.value - a.value; });
+      var lostDealsAllTime = deals.filter(function (d) { return isLostStage(d.Deal_Stage); });
+      var lostReasonRows = groupCount(lostDealsAllTime, 'Deal_Lost_Reason');
+      var newDealsMonthlySeries = b ? b.months.map(function (m) { return deals.filter(function (d) { var dt = d.Open_Date ? new Date(d.Open_Date) : null; return dt && !isNaN(dt) && monthKey(firstOfMonth(dt)) === monthKey(m); }).length; }) : [];
+
+      var forecastMonths = [];
+      var fcCursor = currentMonthWithData();
+      for (var fcI = 0; fcI < 6; fcI++) forecastMonths.push(addMonths(fcCursor, fcI));
+      var opcoSetForForecast = {};
+      open.forEach(function (d) { opcoSetForForecast[d.Omnia_Company || 'Unknown'] = true; });
+      var opcoNamesForForecast = Object.keys(opcoSetForForecast);
+      var weightedForecastByOpco = opcoNamesForForecast.map(function (name, i) {
+        return { label: name, color: OPCO_FORECAST_COLORS[i % OPCO_FORECAST_COLORS.length], values: forecastMonths.map(function (m) { return open.filter(function (d) { var dt = d.Close_Date ? new Date(d.Close_Date) : null; return dt && !isNaN(dt) && monthKey(firstOfMonth(dt)) === monthKey(m) && (d.Omnia_Company || 'Unknown') === name; }).reduce(function (s, d) { return s + (Number(d.Weighted_Open_Pipeline) || 0); }, 0); }) };
+      });
+      var weightedPipelineByOpco = groupSum(open, 'Omnia_Company', 'Weighted_Open_Pipeline');
+
+      registerDownload('pipelineAnalytics', 'pipeline-analytics-' + fileSlug() + '.csv', ['Company', 'Open value'], byOpcoValue.map(function (r) { return [r.label, r.value.toFixed(2)]; }));
+
+      var pipelineAnalyticsSection = '<section class="oc-panel">' + panelHeadWithTools('Pipeline analytics', 'pipelineAnalytics') +
+        '<div class="oc-panel-sub">Most charts below are an all-time snapshot of open pipeline — New deals and Forecast-weighted revenue use their own time windows, noted individually</div>' +
+        '<div class="oc-analytics-grid">' +
+          '<div style="grid-column:1 / -1;"><div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:14px;"><div class="oc-multiple-label">Closed won vs lost</div><div class="oc-caption">' + (wonCountP + lostCountP) + ' closed</div></div>' +
+            '<div style="display:flex; align-items:center; justify-content:center; gap:56px; flex-wrap:wrap; padding:8px 0;">' +
+              '<div class="oc-donut" style="width:200px; height:200px; background:' + donutGradient + ';"><div class="oc-donut-hole" style="width:100px; height:100px;"></div></div>' +
+              '<div style="display:flex; flex-direction:column; gap:20px;">' +
+                '<div class="oc-donut-legend-row"><span class="oc-donut-swatch" style="width:14px; height:14px; background:var(--oc-deep-teal);"></span><div><div style="font-size:17px; font-weight:700;">' + fmtCurrency(sumAmount(wonInPeriod)) + ' · ' + wonCountP + '</div><div class="oc-caption">Closed won</div></div></div>' +
+                '<div class="oc-donut-legend-row"><span class="oc-donut-swatch" style="width:14px; height:14px; background:var(--oc-coral);"></span><div><div style="font-size:17px; font-weight:700;">' + fmtCurrency(sumAmount(lostInPeriod)) + ' · ' + lostCountP + '</div><div class="oc-caption">Closed lost</div></div></div>' +
+              '</div></div></div>' +
+          '<div><div class="oc-multiple-label" style="margin-bottom:10px;">New deals created by month</div>' + (b ? renderSparklineCard({ label: '', color: 'var(--oc-mid-teal)', fmt: function (n) { return Math.round(n); } }, newDealsMonthlySeries, b.months) : '') + '</div>' +
+          '<div>' + renderStackedBarChart('Forecast-weighted revenue by close month' + (opcoNamesForForecast.length > 1 ? ' and owning company' : ''), forecastMonths, weightedForecastByOpco, fmtCurrencyCompact, false) + '</div>' +
+          '<div><div class="oc-multiple-label" style="margin-bottom:10px;">Stage snapshot (open pipeline, all-time)</div>' +
+            (stageSnapshotRows.length ? '<div class="oc-barlist">' + stageSnapshotRows.map(function (r) { return '<div class="oc-barlist-row"><div class="oc-barlist-head"><span class="oc-barlist-name">' + escHtml(r.label) + '</span><span class="oc-barlist-value">' + r.value + ' · ' + r.pctOfTotal.toFixed(0) + '%</span></div><div class="oc-barlist-track"><div class="oc-barlist-fill" style="width:' + Math.min(100, r.pctOfTotal).toFixed(1) + '%; background:var(--oc-mint-deep);"></div></div></div>'; }).join('') + '</div>' : '<div class="oc-caption">No open deals</div>') + '</div>' +
+          '<div><div class="oc-multiple-label" style="margin-bottom:10px;">Open pipeline by owning company (all-time)</div>' + renderBarList(byOpcoValue, fmtCurrency, null, 'var(--oc-mid-teal)') + '</div>' +
+          '<div><div class="oc-multiple-label" style="margin-bottom:10px;">Stalled open deals by stage (all-time)</div><div class="oc-caption" style="margin-bottom:10px;">No update in the last 30 days</div>' + (stalledRows.length ? renderBarList(stalledRows, function (n) { return n + (n === 1 ? ' deal' : ' deals'); }, null, 'var(--oc-coral)') : '<div class="oc-caption">No stalled deals</div>') + '</div>' +
+          '<div><div class="oc-multiple-label" style="margin-bottom:10px;">Open deals by owning company (all-time)</div>' + renderBarList(byOpcoCountRows, function (n) { return n + (n === 1 ? ' deal' : ' deals'); }, null, '#8C6FB0') + '</div>' +
+          '<div><div class="oc-multiple-label" style="margin-bottom:10px;">Closed lost reasons (all-time)</div>' + (lostReasonRows.length ? renderBarList(lostReasonRows, function (n) { return n + (n === 1 ? ' deal' : ' deals'); }, null, '#B76E79') : '<div class="oc-caption">No closed-lost deals with a reason recorded</div>') + '</div>' +
+          '<div><div class="oc-multiple-label" style="margin-bottom:10px;">Weighted open pipeline by owning company (all-time)</div>' + renderBarList(weightedPipelineByOpco, fmtCurrency, null, '#D98C4A') + '</div>' +
+        '</div></section>';
+
+      var agingAll = open.filter(function (d) { return (d.Deal_Stage || '').toLowerCase() !== 'not progressing'; })
+        .map(function (d) { return { deal: d, days: daysSince(d.Stage_Entered_Date || d.Last_Updated) }; })
+        .filter(function (x) { return x.days != null && x.days > 30; }).sort(function (a, b) { return b.days - a.days; });
+      var agingList = sliceForRange(agingAll, 'agingDealsRange');
+      var agingRows = agingList.map(function (x) {
+        var d = x.deal;
+        var bg = x.days > 90 ? 'var(--oc-coral-soft)' : x.days > 60 ? '#FFE9C7' : 'var(--oc-mint-soft)';
+        var color = x.days > 90 ? '#9c2b1a' : x.days > 60 ? '#8a5a00' : 'var(--oc-deep-teal-700)';
+        return '<tr><td style="font-weight:600;">' + escHtml(d.Deal_Name || d.Company || '—') + '</td><td>' + escHtml(d.Omnia_Company || '—') + '</td><td>' + escHtml(d.Deal_Stage || '—') + '</td><td style="text-align:right; font-weight:700;">' + fmtCurrency(Number(d.Amount) || 0) + '</td><td style="text-align:right;"><span class="oc-aging-badge" style="background:' + bg + '; color:' + color + ';">' + x.days + ' days</span></td></tr>';
+      }).join('');
+      registerDownload('agingDeals', 'aging-deals-' + fileSlug() + '.csv', ['Deal name', 'Owning company', 'Stage', 'Value', 'Days in stage'], agingAll.map(function (x) { return [x.deal.Deal_Name || x.deal.Company || '', x.deal.Omnia_Company || '', x.deal.Deal_Stage || '', (Number(x.deal.Amount) || 0).toFixed(2), x.days]; }));
+
+      var agingSection = '<section class="oc-panel">' + panelHeadWithTools('Aging deals — more than 30 days in current stage', 'agingDeals') +
+        '<div class="oc-panel-sub">' + agingAll.length + ' open deals that have sat in their current stage for over 30 days</div>' +
+        (agingAll.length ? '<div style="margin-top:14px; margin-bottom:12px;">' + rangePillsHtml('agingDealsRange', agingAll.length) + '</div>' : '') +
+        (agingList.length ? '<table class="oc-aging-table"><thead><tr><th>Deal name</th><th>Owning company</th><th>Deal stage</th><th style="text-align:right;">Value</th><th style="text-align:right;">Days in stage</th></tr></thead><tbody>' + agingRows + '</tbody></table>' : '<div class="oc-empty-panel">No stalled deals — everything open has moved in the last 30 days.</div>') + '</section>';
+
+      return breakdownSection + pipelineAnalyticsSection + agingSection;
+    }
+
+    // ---- Utilisation page ----
+    function utilisationRowsForPeriod() {
+      var b = periodBounds();
+      if (!b) return [];
+      var months = b.months.filter(function (m) { return !isMonthInProgress(m); });
+      return rowsForMonths(RAW.utilisation || [], 'month', 'Omnia_Company', months);
+    }
+    function utilisationRowsForComparison() {
+      var cmp = comparisonBounds();
+      if (!cmp) return [];
+      return rowsForMonths(RAW.utilisation || [], 'month', 'Omnia_Company', cmp.months);
+    }
+
+    var UTIL_METRIC_OPTIONS = [{ key: 'utilisation', label: 'Utilisation %' }, { key: 'dailyRate', label: 'Daily rate' }];
+    var UTIL_BREAKDOWN_OPTIONS_BASE = [{ key: 'businessUnit', label: 'Business unit' }, { key: 'role', label: 'Role' }];
+    function renderUtilisationPage() {
+      var b = periodBounds();
+      var utilRows = utilisationRowsForPeriod();
+      var utilPct = utilPctForMonths(cardMonths());
+      var avgDailyRate = avgDailyRateForMonths(cardMonths());
+      var cardPlForTargets = plSummaryForMonths(cardMonths());
+      var targetUtilPct = cardPlForTargets ? cardPlForTargets.utilisationPctBudget : null;
+      var targetRate = cardPlForTargets ? cardPlForTargets.dailyRateBudget : null;
+      var gapToTargetPts = (utilPct != null && targetUtilPct != null) ? utilPct - targetUtilPct : null;
+      var rateGapPct = (avgDailyRate != null && targetRate) ? ((avgDailyRate - targetRate) / targetRate) * 100 : null;
+      var cmpUtilPct = utilPctForMonths(cardComparisonMonths());
+      var cmpAvgDailyRate = avgDailyRateForMonths(cardComparisonMonths());
+      var utilDeltaPts = (utilPct != null && cmpUtilPct != null) ? utilPct - cmpUtilPct : null;
+      var rateDeltaPct = (avgDailyRate != null && cmpAvgDailyRate) ? ((avgDailyRate - cmpAvgDailyRate) / cmpAvgDailyRate) * 100 : null;
+
+      function ptsBadge(deltaVal, cmpVal, suffix) {
+        if (deltaVal == null) return '';
+        var relPct = cmpVal ? (deltaVal / cmpVal) * 100 : null;
+        return '<span class="oc-badge ' + (deltaVal > 0 ? 'up' : deltaVal < 0 ? 'down' : 'neutral') + '">' + signedPts(deltaVal) + (relPct != null ? ' (' + fmtDelta(relPct) + ')' : '') + ' ' + suffix + '</span>';
+      }
+      function pctBadge(valueDiff, deltaPct, suffix) {
+        if (deltaPct == null) return '';
+        return '<span class="oc-badge ' + (deltaPct > 0 ? 'up' : deltaPct < 0 ? 'down' : 'neutral') + '">' + signedCurrency(valueDiff) + ' (' + fmtDelta(deltaPct) + ') ' + suffix + '</span>';
+      }
+
+      if (!STATE.utilMetricView) STATE.utilMetricView = 'utilisation';
+      var showingRate = STATE.utilMetricView === 'dailyRate';
+      var metricFmt = showingRate ? fmtCurrencyCompact : fmtPct;
+      var metricOf = showingRate ? avgDailyRateForMonths : utilPctForMonths;
+      var metricColor = showingRate ? 'var(--oc-mid-teal)' : 'var(--oc-deep-teal)';
+      var utilSeries = b ? b.months.map(function (m) { return metricOf([m]); }) : [];
+      var targetSeriesTrend = b ? b.months.map(function (m) { var p = plSummaryForMonths([m]); if (!p) return null; return showingRate ? p.dailyRateBudget : p.utilisationPctBudget; }) : [];
+      var cur = currentMonthWithData();
+      var showForecast = !showingRate && b && isMonthInProgress(b.end);
+      var forecastMonths = showForecast ? [addMonths(cur, 1), addMonths(cur, 2)] : [];
+      var trendMonths = (b ? b.months : []).concat(forecastMonths);
+      var trendSeries = utilSeries.concat(forecastMonths.map(function () { return null; }));
+      var trendTargetSeries = targetSeriesTrend.concat(forecastMonths.map(function () { return null; }));
+      var trendForecastFlags = (b ? b.months.map(function () { return false; }) : []).concat(forecastMonths.map(function () { return true; }));
+      var utilMetric = { key: 'util_metric', label: '', color: metricColor, fmt: metricFmt };
+
+      var metricOfRows = showingRate ? avgDailyRateSafe : utilPctSafe;
+      function metricByGroup(rows, field, keyTransform) {
+        var buckets = {};
+        rows.forEach(function (r) { var raw = r[field] || 'Unknown'; var k = keyTransform ? (keyTransform(raw) || raw) : raw; buckets[k] = buckets[k] || []; buckets[k].push(r); });
+        return Object.keys(buckets).map(function (k) { return { label: k, value: metricOfRows(buckets[k]) || 0 }; }).sort(function (a, b) { return b.value - a.value; });
+      }
+      var roleCodeToTitle = {};
+      (RAW.employeeRoster || []).forEach(function (r) { if (r.role_code && r.role_title && !roleCodeToTitle[r.role_code]) roleCodeToTitle[r.role_code] = r.role_title; });
+      function roleCodeLookup(code) { return roleCodeToTitle[code] || code; }
+      var byBU = metricByGroup(utilRows, 'business_unit');
+      var byRole = metricByGroup(utilRows, 'role_code', roleCodeLookup);
+      var cmpUtilRowsForBreakdown = utilisationRowsForComparison();
+      var cmpByBU = toValueMap(metricByGroup(cmpUtilRowsForBreakdown, 'business_unit'));
+      var cmpByRole = toValueMap(metricByGroup(cmpUtilRowsForBreakdown, 'role_code', roleCodeLookup));
+
+      if (!STATE.utilBreakdownView) STATE.utilBreakdownView = 'businessUnit';
+      var breakdownIsRole = STATE.utilBreakdownView === 'role';
+      var breakdownRows = breakdownIsRole ? byRole : byBU;
+      var breakdownCmpMap = breakdownIsRole ? cmpByRole : cmpByBU;
+      var breakdownTitle = (showingRate ? 'Avg. daily rate' : 'Avg. billable utilisation') + ' by ' + (breakdownIsRole ? 'role' : 'business unit');
+
+      registerDownload('utilTrend', 'utilisation-trend-' + fileSlug() + '.csv', [showingRate ? 'Avg daily rate' : 'Utilisation %', 'Target'], trendMonths.map(function (m, i) { return [monthYearLabel(m), trendSeries[i] != null ? trendSeries[i].toFixed(1) : '', trendTargetSeries[i] != null ? trendTargetSeries[i].toFixed(1) : '']; }));
+      registerDownload('utilByBU', 'utilisation-breakdown-' + fileSlug() + '.csv', [breakdownIsRole ? 'Role' : 'Business unit', showingRate ? 'Avg daily rate' : 'Utilisation %', COMPARE_PREFIX[STATE.compareBasis]], breakdownRows.map(function (i) { return [i.label, i.value.toFixed(1), breakdownCmpMap[i.label] != null ? breakdownCmpMap[i.label].toFixed(1) : '']; }));
+
+      var utilInProgressNote = '<div class="oc-note" style="margin-bottom:16px; border-left:3px solid var(--oc-coral); padding-left:12px; background:#fff;">&#9888; ' + (b && isMonthInProgress(b.end) ? 'Utilisation & daily rate isn\'t shown for the current month until it closes. ' : '') + 'Business-unit/role breakdown and targets need fields the current DAX query doesn\'t fetch yet.</div>';
+
+      return utilInProgressNote + '<section class="oc-kpi-grid">' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Utilisation %</div><div class="oc-kpi-value">' + (utilPct != null ? fmtPct(utilPct) : '—') + '</div><div class="oc-kpi-delta-row" style="flex-direction:column; align-items:flex-start; gap:4px;">' +
+          '<div>' + (gapToTargetPts != null ? ptsBadge(gapToTargetPts, targetUtilPct, 'vs target') : (targetUtilPct != null ? '<span style="color:var(--oc-coral); font-weight:700; font-size:12px;">Target: ' + fmtPct(targetUtilPct) + '</span>' : '<span class="oc-caption">No target for this period</span>')) + '</div>' +
+          '<div>' + ptsBadge(utilDeltaPts, cmpUtilPct, COMPARE_PREFIX[STATE.compareBasis].toLowerCase()) + '</div></div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Avg daily rate</div><div class="oc-kpi-value">' + (avgDailyRate != null ? fmtCurrency(avgDailyRate) : '—') + '</div><div class="oc-kpi-delta-row" style="flex-direction:column; align-items:flex-start; gap:4px;">' +
+          '<div>' + (rateGapPct != null ? pctBadge(avgDailyRate - targetRate, rateGapPct, 'vs target') : (targetRate != null ? '<span style="color:var(--oc-coral); font-weight:700; font-size:12px;">Target: ' + fmtCurrency(targetRate) + '</span>' : '<span class="oc-caption">No target for this period</span>')) + '</div>' +
+          '<div>' + pctBadge(avgDailyRate - cmpAvgDailyRate, rateDeltaPct, COMPARE_PREFIX[STATE.compareBasis].toLowerCase()) + '</div></div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div></section>' +
+        '<section class="oc-panel">' + panelHeadWithToolsAndExtra(showingRate ? 'Avg daily rate' : 'Utilisation %', 'utilTrend', renderPillToggle(UTIL_METRIC_OPTIONS, 'utilMetricView')) +
+          renderSparklineCard(utilMetric, trendSeries, trendMonths, null, trendForecastFlags, true, trendTargetSeries) +
+          (showForecast ? '<div class="oc-note">The last 2 months shown are forecast placeholders — no utilisation data exists yet for ' + monthYearLabel(forecastMonths[0]) + ' or ' + monthYearLabel(forecastMonths[1]) + '.</div>' : '') + '</section>' +
+        '<section class="oc-panel">' + panelHeadWithToolsAndExtra(breakdownTitle, 'utilByBU', renderPillToggle(UTIL_BREAKDOWN_OPTIONS_BASE, 'utilBreakdownView')) +
+          renderBarList(breakdownRows, metricFmt, breakdownCmpMap, null, COMPARE_PREFIX[STATE.compareBasis], null, null, true) + '</section>';
+    }
+
+    // ---- Alliances (Certifications) page ----
+    function renderAlliancePieChart(rows, totalAllOpportunities, centerLabel, pieColLabel) {
+      var pieTotal = rows.reduce(function (s, r) { return s + r.value; }, 0);
+      var acc = 0;
+      var stops = rows.map(function (r, i) {
+        var startPct = pieTotal ? (acc / pieTotal) * 100 : 0; acc += r.value;
+        var endPct = pieTotal ? (acc / pieTotal) * 100 : 0;
+        return DONUT_COLORS[i % DONUT_COLORS.length] + ' ' + startPct.toFixed(1) + '% ' + endPct.toFixed(1) + '%';
+      });
+      var gradient = stops.length ? 'conic-gradient(' + stops.join(', ') + ')' : 'var(--bg-muted)';
+      var cols = '1.4fr 0.8fr 0.9fr 0.9fr';
+      var rowsHtml = rows.map(function (r, i) {
+        var pctOfAll = totalAllOpportunities ? (r.value / totalAllOpportunities) * 100 : null;
+        var pctOfPie = pieTotal ? (r.value / pieTotal) * 100 : 0;
+        return '<div style="display:grid; grid-template-columns:' + cols + '; gap:8px; padding:11px 10px; border-bottom:1px solid var(--rule); align-items:center;">' +
+          '<div style="font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px;"><span style="width:10px; height:10px; border-radius:50%; background:' + DONUT_COLORS[i % DONUT_COLORS.length] + '; display:inline-block; flex-shrink:0;"></span>' + escHtml(r.label) + '</div>' +
+          '<div style="font-size:13.5px; font-weight:700;">' + r.value + (r.value === 1 ? ' opportunity' : ' opportunities') + '</div>' +
+          '<div style="font-size:12.5px; color:var(--fg3);">' + (pctOfAll != null ? pctOfAll.toFixed(1) + '%' : '—') + '</div>' +
+          '<div style="font-size:12.5px; color:var(--fg3);">' + pctOfPie.toFixed(1) + '%</div></div>';
+      }).join('');
+      return '<div style="display:grid; grid-template-columns:200px 1fr; gap:28px; align-items:center;">' +
+        '<div style="position:relative; width:160px; height:160px; margin:0 auto;"><div style="width:160px; height:160px; border-radius:50%; background:' + gradient + ';"></div><div style="position:absolute; top:32px; left:32px; width:96px; height:96px; border-radius:50%; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-size:11px; color:var(--fg3); font-weight:600;">' + (centerLabel || 'TOTAL') + '</div><div style="font-size:15px; font-weight:800;">' + pieTotal + '</div></div></div>' +
+        '<div><div style="display:grid; grid-template-columns:' + cols + '; gap:8px; padding:0 10px 8px; font-size:11px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:var(--fg3); border-bottom:1px solid var(--rule);"><div></div><div>Count</div><div>% of all opportunities</div><div>' + (pieColLabel || '% of pie') + '</div></div>' + rowsHtml + '</div></div>';
+    }
+    var ALLIANCE_BREAKDOWN_OPTIONS = [{ key: 'partners', label: 'Alliance breakdown' }, { key: 'portal', label: 'Logged in partner portal' }];
+    var CERTS_VIEW_OPTIONS = [{ key: 'active', label: 'Active by type' }, { key: 'completions', label: 'Completions over time' }, { key: 'expiring', label: 'Upcoming expirations' }];
+    function certRowsForEntity() {
+      if (STATE.entity === COMBINED_ENTITY_LABEL || !COMBINED_ENTITIES.length) return RAW.certifications || [];
+      return [];
+    }
+    function buildCertificationsSectionHtml() {
+      var all = certRowsForEntity();
+      var certs = all.filter(function (r) { return r.TrainingType === 'Certification'; });
+      var active = certs.filter(function (r) { return r.ActivationStatus === 'Active'; });
+      var peopleSet = {};
+      active.forEach(function (r) { if (r.CorpEmail) peopleSet[r.CorpEmail] = true; });
+      var activeCertifiedEmployees = Object.keys(peopleSet).length;
+      var byTitle = groupCount(active, 'TrainingTitle');
+      var today = new Date();
+      var in90 = addMonths(today, 3);
+      var expiringSoon = active.filter(function (r) { if (!r.ExpirationDate) return false; var d = new Date(r.ExpirationDate); return !isNaN(d) && d >= today && d <= in90; });
+
+      var last12 = MONTH_UNIVERSE.filter(function (m) { return m <= currentMonthWithData(); }).slice(-12);
+      if (!last12.length) last12 = [currentMonthWithData()];
+      var completedByMonthSeries = last12.map(function (m) { return certs.filter(function (r) { var d = r.TrainingCompletionDate ? new Date(r.TrainingCompletionDate) : null; return d && !isNaN(d) && monthKey(firstOfMonth(d)) === monthKey(m); }).length; });
+      var expiringMonths = [];
+      var cursor = currentMonthWithData();
+      for (var i = 1; i <= 12; i++) expiringMonths.push(addMonths(cursor, i));
+      var expiringByMonthSeries = expiringMonths.map(function (m) { return active.filter(function (r) { var d = r.ExpirationDate ? new Date(r.ExpirationDate) : null; return d && !isNaN(d) && monthKey(firstOfMonth(d)) === monthKey(m); }).length; });
+
+      registerDownload('certsByTitle', 'active-certifications-by-type-' + fileSlug() + '.csv', ['Certification', 'People'], byTitle.map(function (i) { return [i.label, i.value]; }));
+      registerDownload('certsCompletedByMonth', 'certifications-completed-by-month-' + fileSlug() + '.csv', ['Month', 'Completed'], last12.map(function (m, i) { return [monthYearLabel(m), completedByMonthSeries[i]]; }));
+      registerDownload('certsExpiringByMonth', 'certifications-expiring-by-month-' + fileSlug() + '.csv', ['Month', 'Expiring'], expiringMonths.map(function (m, i) { return [monthYearLabel(m), expiringByMonthSeries[i]]; }));
+
+      if (!STATE.certsView) STATE.certsView = 'active';
+      var certsGraphHtml;
+      if (STATE.certsView === 'completions') {
+        certsGraphHtml = panelHeadWithTools('Certification completions over time', 'certsCompletedByMonth') + renderSparklineCard({ label: '', color: 'var(--oc-deep-teal)', fmt: function (n) { return Math.round(n); } }, completedByMonthSeries, last12);
+      } else if (STATE.certsView === 'expiring') {
+        certsGraphHtml = panelHeadWithTools('Upcoming certification expirations', 'certsExpiringByMonth') + renderSparklineCard({ label: '', color: 'var(--oc-coral)', fmt: function (n) { return Math.round(n); } }, expiringByMonthSeries, expiringMonths);
+      } else {
+        certsGraphHtml = panelHeadWithTools('Active certifications by type', 'certsByTitle') + renderRangedBarList(byTitle, function (n) { return n + (n === 1 ? ' person' : ' people'); }, 'certsByTitleRange');
+      }
+      return '<section class="oc-panel"><h3 class="oc-panel-title">Microsoft Certifications</h3>' +
+        '<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; margin:18px 0 20px;">' +
+          '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Active certifications</div><div style="font-size:20px; font-weight:800;">' + active.length + '</div></div>' +
+          '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Active certified employees</div><div style="font-size:20px; font-weight:800;">' + activeCertifiedEmployees + '</div></div>' +
+          '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Expiring within 90 days</div><div style="font-size:20px; font-weight:800;">' + expiringSoon.length + '</div></div></div>' +
+        '<div style="margin-bottom:16px;">' + renderPillToggle(CERTS_VIEW_OPTIONS, 'certsView') + '</div>' + certsGraphHtml + '</section>';
+    }
+    function renderCertificationsPage() {
+      var allDeals = dealsForEntity();
+      var totalDeals = allDeals.length;
+      var KNOWN_ALLIANCE_PARTNERS = ['databricks', 'microsoft', 'snowflake'];
+      function isAlliancePartnerValue(v) { var lower = String(v || '').toLowerCase(); return KNOWN_ALLIANCE_PARTNERS.some(function (p) { return lower.indexOf(p) !== -1; }); }
+      var allianceDeals = allDeals.filter(function (d) { return isAlliancePartnerValue(d.Alliance_Partners); });
+      var pctAllianceOpps = totalDeals ? (allianceDeals.length / totalDeals) * 100 : null;
+      var loggedInPortalCount = allianceDeals.filter(function (d) { return String(d.Logged_In_Partner_Portal || '').trim().toLowerCase() === 'yes'; }).length;
+      var pctLoggedInPortal = allianceDeals.length ? (loggedInPortalCount / allianceDeals.length) * 100 : null;
+      var allianceBreakdownDeals = allDeals.filter(function (d) { var v = String(d.Alliance_Partners || '').trim().toLowerCase(); return v !== '' && v !== 'null'; });
+      var allianceBreakdown = groupCount(allianceBreakdownDeals, 'Alliance_Partners');
+      var portalBreakdown = groupCount(allianceDeals.map(function (d) { var v = String(d.Logged_In_Partner_Portal || '').trim().toLowerCase(); return { Logged_In_Partner_Portal: (v === '' || v === 'null') ? 'Unknown' : d.Logged_In_Partner_Portal }; }), 'Logged_In_Partner_Portal');
+
+      if (!STATE.allianceBreakdownView) STATE.allianceBreakdownView = 'partners';
+      var showingPortalView = STATE.allianceBreakdownView === 'portal';
+      var activeBreakdown = showingPortalView ? portalBreakdown : allianceBreakdown;
+      var pieColLabel = showingPortalView ? '% of tagged alliances' : '% of shown breakdown';
+      var breakdownScopeCaption = showingPortalView ? 'Alliance-tagged opportunities only (Databricks, Microsoft, Snowflake, or a combination)' : 'All opportunities with a recorded alliance status';
+      registerDownload('allianceBreakdown', (showingPortalView ? 'partner-portal-breakdown-' : 'alliance-breakdown-') + fileSlug() + '.csv', [showingPortalView ? 'Logged in partner portal' : 'Alliance partner', 'Opportunities', '% of all opportunities', pieColLabel],
+        activeBreakdown.map(function (i) { var pieTotal = activeBreakdown.reduce(function (s, x) { return s + x.value; }, 0); return [i.label, i.value, totalDeals ? ((i.value / totalDeals) * 100).toFixed(1) : '', pieTotal ? ((i.value / pieTotal) * 100).toFixed(1) : '']; }));
+
+      var allianceCardsHtml = '<section class="oc-kpi-grid">' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">% of HubSpot opportunities</div><div class="oc-kpi-value">' + (pctAllianceOpps != null ? fmtPct(pctAllianceOpps) : '—') + '</div><div class="oc-caption" style="margin-top:6px;">Tagged as alliance opportunities</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">% logged in partner portal</div><div class="oc-kpi-value">' + (pctLoggedInPortal != null ? fmtPct(pctLoggedInPortal) : '—') + '</div><div class="oc-caption" style="margin-top:6px;">Of alliance-tagged opportunities</div></div></section>' +
+        '<section class="oc-panel">' + panelHeadWithToolsAndExtra('Alliance breakdown', 'allianceBreakdown', renderPillToggle(ALLIANCE_BREAKDOWN_OPTIONS, 'allianceBreakdownView')) + '<div class="oc-panel-sub" style="margin-top:-4px;">' + breakdownScopeCaption + '</div>' + renderAlliancePieChart(activeBreakdown, totalDeals, 'TOTAL', pieColLabel) + '</section>';
+
+      var note = allianceDeals.length === 0 ? '<div class="oc-note" style="margin-bottom:16px; border-left:3px solid var(--oc-coral); padding-left:12px; background:#fff;">&#9888; Alliance_Partners/Logged_In_Partner_Portal fields aren\'t queried from the semantic model yet, so this breakdown is empty until Phase 1 widens the deals query.</div>' : '';
+      var certificationsSectionHtml = STATE.entity === COMBINED_ENTITY_LABEL ? buildCertificationsSectionHtml() : '';
+      return note + allianceCardsHtml + certificationsSectionHtml;
+    }
+
     // ---- Page dispatch (Phase 2 will replace each remaining placeholder
     // with a real ported render*Page function, one nav item at a time) ----
     function goToPage(pageKey) {
@@ -2607,6 +2980,12 @@
         el.innerHTML = renderRevenuePage();
       } else if (STATE.page === 'clients') {
         el.innerHTML = renderClientsPage();
+      } else if (STATE.page === 'deals') {
+        el.innerHTML = renderDealsPage();
+      } else if (STATE.page === 'utilisation') {
+        el.innerHTML = renderUtilisationPage();
+      } else if (STATE.page === 'certifications') {
+        el.innerHTML = renderCertificationsPage();
       } else {
         var navItem = NAV_ITEMS.filter(function (n) { return n.key === STATE.page; })[0];
         el.innerHTML = renderPlaceholderPage(navItem ? navItem.label : STATE.page);
