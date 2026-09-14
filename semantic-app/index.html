@@ -465,6 +465,20 @@
       }
     }
 
+    // Mirrors addUserToPowerBiWorkspace — so "Deactivate" is a real, full
+    // revocation (app gate + actual data access) rather than just hiding the
+    // app's UI while leaving their Power BI workspace membership intact.
+    async function removeUserFromPowerBiWorkspace(token, email) {
+      var resp = await fetch("https://api.powerbi.com/v1.0/myorg/groups/" + WORKSPACE_ID + "/users/" + encodeURIComponent(email), {
+        method: "DELETE",
+        headers: { Authorization: "Bearer " + token },
+      });
+      if (!resp.ok) {
+        var text = await resp.text();
+        throw new Error("Could not remove from the Power BI workspace (HTTP " + resp.status + "): " + text);
+      }
+    }
+
     // ---- Power BI dataset query layer ----
     // This tier only accepts one query per executeQueries call, so queries
     // run as separate sequential requests rather than a single batched call.
@@ -1965,11 +1979,29 @@
         var email = target.getAttribute("data-deactivate");
         target.disabled = true;
         target.textContent = "Deactivating…";
+        status.textContent = "";
+        status.className = "feedback-status";
         try {
           var token = await getFeedbackGraphToken();
           var basePath = feedbackWorkbookBasePath();
           await deactivateAccessUser(token, basePath, email);
+          status.textContent = "Removed from the app's access list.";
+          status.className = "feedback-status ok";
           await refreshList();
+
+          // Mirrors the "Add" flow: also revoke real Power BI workspace
+          // access, not just this app's own gate. Best-effort, same caveat
+          // as Add — requires the caller to already be a workspace admin.
+          try {
+            var pbiToken = await getToken(true);
+            await removeUserFromPowerBiWorkspace(pbiToken, email);
+            status.textContent = "Removed from the app's access list and the Power BI workspace.";
+          } catch (pbiErr) {
+            status.textContent = "Removed from the app's access list, but could not remove from the Power BI workspace: " +
+              (pbiErr && pbiErr.message ? pbiErr.message : String(pbiErr)) +
+              ". They may still have real data access there until removed manually.";
+            status.className = "feedback-status error";
+          }
         } catch (e2) {
           status.textContent = (e2 && e2.message) ? e2.message : String(e2);
           status.className = "feedback-status error";
