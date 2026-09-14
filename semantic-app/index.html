@@ -276,6 +276,13 @@
     var WORKSPACE_ID = "bbbd2ec3-1085-4a2c-af8a-a0f82fa49f76";
     var DATASET_ID = "8c11a7f7-0992-4591-b51a-50889e641617"; // "Omnia Reporting Demo" semantic model
     var POWERBI_SCOPE = "https://analysis.windows.net/powerbi/api/Dataset.Read.All";
+    // Workspace.ReadWrite.All is bundled in alongside Dataset.Read.All (same
+    // resource, one token request/consent) so the Manage Access panel can
+    // also add someone to the Power BI workspace itself, not just the app's
+    // own AccessUsers list — see addUserToPowerBiWorkspace() below. Whoever
+    // clicks "Add" still needs to already be a Power BI workspace admin
+    // themselves; Power BI enforces that server-side regardless of scope.
+    var POWERBI_SCOPES = [POWERBI_SCOPE, "https://analysis.windows.net/powerbi/api/Workspace.ReadWrite.All"];
 
     // Feedback writes to a dedicated Excel workbook via Microsoft Graph — a
     // separate concern from the Power BI dataset query above, since it needs
@@ -427,16 +434,34 @@
     async function getToken(interactive) {
       await msalReady;
       var accounts = msalApp.getAllAccounts();
-      var request = { scopes: [POWERBI_SCOPE], account: accounts[0] };
+      var request = { scopes: POWERBI_SCOPES, account: accounts[0] };
       try {
         var result = await msalApp.acquireTokenSilent(request);
         return result.accessToken;
       } catch (e) {
         if (!interactive) throw e;
-        var result = await msalApp.loginPopup({ scopes: [POWERBI_SCOPE] });
+        var result = await msalApp.loginPopup({ scopes: POWERBI_SCOPES });
         setSignedInUi(result.account);
-        var silent = await msalApp.acquireTokenSilent({ scopes: [POWERBI_SCOPE], account: result.account });
+        var silent = await msalApp.acquireTokenSilent({ scopes: POWERBI_SCOPES, account: result.account });
         return silent.accessToken;
+      }
+    }
+
+    // Adds a person directly to the Power BI workspace as a Viewer — this is
+    // what actually grants data access (see the note on POWERBI_SCOPES
+    // above). The caller must already be a workspace admin themselves;
+    // Power BI returns an error otherwise, which callers should treat as
+    // non-fatal (the AccessUsers entry still saved) rather than blocking
+    // the whole "Add" action on it.
+    async function addUserToPowerBiWorkspace(token, email) {
+      var resp = await fetch("https://api.powerbi.com/v1.0/myorg/groups/" + WORKSPACE_ID + "/users", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ emailAddress: email, groupUserAccessRight: "Viewer" }),
+      });
+      if (!resp.ok) {
+        var text = await resp.text();
+        throw new Error("Could not add to the Power BI workspace (HTTP " + resp.status + "): " + text);
       }
     }
 
@@ -1906,9 +1931,26 @@
           var basePath = feedbackWorkbookBasePath();
           await upsertAccessUser(token, basePath, email, roleSelect.value, CURRENT_SESSION.email);
           emailInput.value = "";
-          status.textContent = "Saved.";
+          status.textContent = "Added to the app's access list.";
           status.className = "feedback-status ok";
           await refreshList();
+
+          // Also grant real Power BI workspace access (Viewer) — the
+          // AccessUsers entry above only gates this app's own UI, it
+          // doesn't give them any actual data access on its own. Best-effort:
+          // requires the current user to already be a Power BI workspace
+          // admin themselves, so a failure here shouldn't undo the
+          // already-saved AccessUsers entry.
+          try {
+            var pbiToken = await getToken(true);
+            await addUserToPowerBiWorkspace(pbiToken, email);
+            status.textContent = "Added to the app's access list and the Power BI workspace (Viewer).";
+          } catch (pbiErr) {
+            status.textContent = "Added to the app's access list, but could not add to the Power BI workspace: " +
+              (pbiErr && pbiErr.message ? pbiErr.message : String(pbiErr)) +
+              ". They may need to be added there separately (e.g. if you're not a workspace admin, or they already have access).";
+            status.className = "feedback-status error";
+          }
         } catch (e) {
           status.textContent = (e && e.message) ? e.message : String(e);
           status.className = "feedback-status error";
