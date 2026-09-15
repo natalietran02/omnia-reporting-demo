@@ -1637,8 +1637,15 @@
           entity: r["data_powerbi_unified_fact[entity]"],
           client_industry: r["data_powerbi_unified_fact[client_industry]"] || "Unspecified",
           client_name: r["data_powerbi_unified_fact[client_name]"] || "Unknown",
-          project_code: r["data_powerbi_unified_fact[Project_Code]"] || "",
-          project_name: r["data_powerbi_unified_fact[Project_Name]"] || "Unspecified",
+          // Query/model casing is Project_Code/Project_Name (capitalized —
+          // see Q_PROJECT_FACT) but the executeQueries REST API returns
+          // unaliased SUMMARIZECOLUMNS group-by keys using each column's own
+          // internal storage-identifier casing, not the model's display
+          // name — confirmed lowercase for this model via the Health page's
+          // raw sample-row diagnostic. Do not "fix" this back to match the
+          // query text; it was tested against the live API, not assumed.
+          project_code: r["data_powerbi_unified_fact[project_code]"] || "",
+          project_name: r["data_powerbi_unified_fact[project_name]"] || "Unspecified",
           project_stream: r["data_powerbi_unified_fact[project_stream]"] || "Unspecified",
           total_revenue: r["[TotalRevenue]"] || 0,
           gross_margin: r["[GrossMargin]"] || 0,
@@ -1702,7 +1709,11 @@
     function parsePlRows(rows) {
       return rows.map(function (r) {
         return {
-          month: r["data_pl[Month]"],
+          // Query/model casing is Month (capitalized — see Q_PL) but the
+          // executeQueries REST API returns this SUMMARIZECOLUMNS group-by
+          // key lowercase regardless (confirmed via the Health page's raw
+          // sample-row diagnostic — see the same note in parseProjectRows).
+          month: r["data_pl[month]"],
           Omnia_Company: r["data_pl[Omnia_Company]"],
           revenue_actual: r["[RevenueActual]"], revenue_budget: r["[RevenueBudget]"],
           gross_margin_actual: r["[GrossMarginActual]"], gross_margin_forecast: r["[GrossMarginForecast]"], gp_budget: r["[GpBudget]"],
