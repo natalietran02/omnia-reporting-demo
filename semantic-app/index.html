@@ -432,7 +432,15 @@
       "    data_powerbi_unified_fact[client_industry],\n" +
       "    data_powerbi_unified_fact[Project_Name],\n" +
       "    data_powerbi_unified_fact[project_stream],\n" +
-      "    \"TotalRevenue\", SUM(data_powerbi_unified_fact[total_revenue])\n" +
+      "    \"TotalRevenue\", SUM(data_powerbi_unified_fact[total_revenue]),\n" +
+      // Added to unlock gross-margin breakdowns (Client Deep Dive, Projects
+      // page) and the FTE/avg-daily-rate figures Client Deep Dive is missing —
+      // pure additive SUM measures on the same table/grain as TotalRevenue
+      // above, column names per Code.js's TABS.unifiedFact comment, not yet
+      // confirmed against the live model.
+      "    \"GrossMargin\", SUM(data_powerbi_unified_fact[gross_margin]),\n" +
+      "    \"Headcount\", SUM(data_powerbi_unified_fact[headcount]),\n" +
+      "    \"TotalDays\", SUM(data_powerbi_unified_fact[total_days])\n" +
       ")\n" +
       "ORDER BY data_powerbi_unified_fact[month_date]";
 
@@ -1584,6 +1592,9 @@
           project_name: r["data_powerbi_unified_fact[Project_Name]"] || "Unspecified",
           project_stream: r["data_powerbi_unified_fact[project_stream]"] || "Unspecified",
           total_revenue: r["[TotalRevenue]"] || 0,
+          gross_margin: r["[GrossMargin]"] || 0,
+          headcount: r["[Headcount]"] || 0,
+          total_days: r["[TotalDays]"] || 0,
         };
       }).filter(function (r) { return r.month_date; });
     }
@@ -2635,14 +2646,16 @@
       var periodRevenue = rowsForMonths(selectedRowsAll, 'month_date', null, cardMonths()).reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0);
       var l6Revenue = last6Rows.reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0);
       var l6Margin = weightedMarginPctSafe(last6Rows);
+      var l6Fte = last6.length ? last6Rows.reduce(function (s, r) { return s + (Number(r.headcount) || 0); }, 0) / last6.length : null;
       var activeProjects = {};
       rowsForMonths(selectedRowsAll, 'month_date', null, [cur]).forEach(function (r) { if (r.project_name && (Number(r.total_revenue) || 0) > 0) activeProjects[r.project_name] = true; });
       var activeProjectCount = Object.keys(activeProjects).length;
 
-      var cardsHtml = '<div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:20px;">' +
+      var cardsHtml = '<div style="display:grid; grid-template-columns:repeat(5, 1fr); gap:12px; margin-bottom:20px;">' +
         '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">' + cardPeriodLabelText() + ' revenue</div><div style="font-size:19px; font-weight:800;">' + fmtCurrency(periodRevenue) + '</div></div>' +
         '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Rolling L6 revenue</div><div style="font-size:19px; font-weight:800;">' + fmtCurrency(l6Revenue) + '</div></div>' +
         '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Rolling L6 margin</div><div style="font-size:19px; font-weight:800;">' + (l6Margin != null ? fmtPct(l6Margin) : '—') + '</div></div>' +
+        '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Rolling L6 avg FTE</div><div style="font-size:19px; font-weight:800;">' + (l6Fte != null ? l6Fte.toFixed(1) : '—') + '</div></div>' +
         '<div style="background:var(--bg-muted); border-radius:var(--radius-lg); padding:14px 16px;"><div class="oc-kpi-label" style="margin-bottom:6px;">Active projects</div><div style="font-size:19px; font-weight:800;">' + activeProjectCount + '</div></div></div>';
 
       var monthlyRevenueSeries = last6.map(function (m) { var rows = rowsForMonths(selectedRowsAll, 'month_date', null, [m]); return rows.length ? rows.reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0) : null; });
@@ -2664,7 +2677,14 @@
       });
       var marginSeries = last6.map(function (m) { var rows = rowsForMonths(selectedRowsAll, 'month_date', null, [m]); return rows.length ? weightedMarginPctSafe(rows) : null; });
       var marginHasData = marginSeries.some(function (v) { return v != null; });
-      function oneLinerHtml(title) { return '<div><div class="oc-multiple-label" style="margin-bottom:8px;">' + title + '</div><div class="oc-not-ready" style="padding:10px 14px; font-size:12.5px;"><span class="oc-not-ready-tag">Not available yet</span>Needs gross_margin data from the semantic model.</div></div>'; }
+      var rateSeries = last6.map(function (m) {
+        var rows = rowsForMonths(selectedRowsAll, 'month_date', null, [m]);
+        var rev = rows.reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0);
+        var days = rows.reduce(function (s, r) { return s + (Number(r.total_days) || 0); }, 0);
+        return days ? rev / days : null;
+      });
+      var rateHasData = rateSeries.some(function (v) { return v != null; });
+      function oneLinerHtml(title, reason) { return '<div><div class="oc-multiple-label" style="margin-bottom:8px;">' + title + '</div><div class="oc-not-ready" style="padding:10px 14px; font-size:12.5px;"><span class="oc-not-ready-tag">Not available yet</span>' + reason + '</div></div>'; }
 
       var graphsHtml = '<div style="display:flex; flex-direction:column; gap:24px; margin-top:20px;">' +
         '<div>' + renderSparklineCard({ label: 'Monthly revenue', color: 'var(--oc-deep-teal)', fmt: fmtCurrencyCompact }, monthlyRevenueSeries, last6, null, null, false, null, 195) + '</div>' +
@@ -2673,24 +2693,57 @@
           renderSparklineCard({ label: 'Rolling 6-month revenue', color: 'var(--oc-mint-deep)', fmt: fmtCurrencyCompact }, rolling6Series, last6) +
         '</div>' +
         '<div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:24px;">' +
-          (marginHasData ? renderSparklineCard({ label: 'Margin %', color: 'var(--oc-coral)', fmt: fmtPct }, marginSeries, last6) : oneLinerHtml('Margin %')) +
+          (marginHasData ? renderSparklineCard({ label: 'Margin %', color: 'var(--oc-coral)', fmt: fmtPct }, marginSeries, last6) : oneLinerHtml('Margin %', 'No gross-margin data for this client in the last 6 months.')) +
+          (rateHasData ? renderSparklineCard({ label: 'Blended avg daily rate', color: 'var(--oc-deep-teal)', fmt: fmtCurrencyCompact }, rateSeries, last6) : oneLinerHtml('Blended avg daily rate', 'No total_days data for this client in the last 6 months.')) +
         '</div></div>';
+
+      // ---- Project breakdown table (last 6 months) — keyed by project_name
+      // since project_code isn't fetched here (unlike the Apps Script engine,
+      // which keys by project_code); fine in practice as long as project
+      // names are unique within a client. ----
+      var refLookup = refProjectLookup();
+      var projectNames = {};
+      last6Rows.forEach(function (r) { if (r.project_name) projectNames[r.project_name] = true; });
+      var lastMonthKey = monthKey(last6[last6.length - 1]);
+      var prevMonthKey = last6.length > 1 ? monthKey(last6[last6.length - 2]) : null;
+      var projPeriodStart = last6[0];
+      var projPeriodEnd = addMonths(last6[last6.length - 1], 1);
+      var projectTableRows = Object.keys(projectNames).map(function (name) {
+        var projRows = last6Rows.filter(function (r) { return r.project_name === name; });
+        var total = projRows.reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0);
+        var thisMonthVal = projRows.filter(function (r) { return monthKey(firstOfMonth(new Date(r.month_date))) === lastMonthKey; }).reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0);
+        var prevMonthVal = prevMonthKey ? projRows.filter(function (r) { return monthKey(firstOfMonth(new Date(r.month_date))) === prevMonthKey; }).reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0) : 0;
+        var trend = thisMonthVal > prevMonthVal ? '▲' : thisMonthVal < prevMonthVal ? '▼' : '—';
+        var trendColor = thisMonthVal > prevMonthVal ? 'var(--oc-mint-deep)' : thisMonthVal < prevMonthVal ? 'var(--oc-coral)' : 'var(--fg3)';
+        var status = classifyProjectStatus(refLookup[name], projPeriodStart, projPeriodEnd, thisMonthVal);
+        return { name: name, status: status, trend: trend, trendColor: trendColor, thisMonthVal: thisMonthVal, total: total };
+      }).sort(function (a, b) { return b.total - a.total; });
+      var projectTableHtml = projectTableRows.length
+        ? '<table class="oc-table"><thead><tr><th>Project</th><th>Status</th><th>Trend L6M</th><th style="text-align:right;">Monthly revenue</th><th style="text-align:right;">L6M total</th></tr></thead><tbody>' +
+          projectTableRows.map(function (p) {
+            return '<tr><td style="font-weight:600;">' + escHtml(p.name) + '</td><td>' + escHtml(p.status) + '</td><td style="color:' + p.trendColor + '; font-weight:700;">' + p.trend + '</td><td style="text-align:right;">' + fmtCurrency(p.thisMonthVal) + '</td><td style="text-align:right; font-weight:700;">' + fmtCurrency(p.total) + '</td></tr>';
+          }).join('') + '</tbody></table>'
+        : '<div class="oc-caption">No project activity in the last 6 months.</div>';
 
       var scopeOptions = STATE.clientDeepDiveScope === 'top5' ? last6ClientTotals.slice(0, 5) : allClientTotals;
       var clientOptionsHtml = scopeOptions.map(function (c) { return '<option value="' + escAttr(c.label) + '"' + (c.label === selected ? ' selected' : '') + '>' + escHtml(c.label) + '</option>'; }).join('');
       var scopeToggle = renderPillToggle([{ key: 'top5', label: 'Top 5 (L6M)' }, { key: 'all', label: 'Full list' }], 'clientDeepDiveScope');
 
-      var monthlyHeader = ['Month', 'Revenue', 'Margin %', 'Rolling 6mo revenue'].concat(projectSeries.map(function (s) { return 'Revenue — ' + s.label; }));
+      var monthlyHeader = ['Month', 'Revenue', 'Margin %', 'Rolling 6mo revenue', 'Blended avg daily rate'].concat(projectSeries.map(function (s) { return 'Revenue — ' + s.label; }));
       var monthlyRows = last6.map(function (m, i) {
-        return [monthYearLabel(m), monthlyRevenueSeries[i] != null ? monthlyRevenueSeries[i].toFixed(2) : '', marginSeries[i] != null ? marginSeries[i].toFixed(1) : '', rolling6Series[i] != null ? rolling6Series[i].toFixed(2) : ''].concat(projectSeries.map(function (s) { return (s.values[i] || 0).toFixed(2); }));
+        return [monthYearLabel(m), monthlyRevenueSeries[i] != null ? monthlyRevenueSeries[i].toFixed(2) : '', marginSeries[i] != null ? marginSeries[i].toFixed(1) : '', rolling6Series[i] != null ? rolling6Series[i].toFixed(2) : '', rateSeries[i] != null ? rateSeries[i].toFixed(2) : ''].concat(projectSeries.map(function (s) { return (s.values[i] || 0).toFixed(2); }));
       });
-      registerDownload('clientDeepDive', 'client-deep-dive-' + selected.replace(/\s+/g, '-').toLowerCase() + '-' + fileSlug() + '.csv', monthlyHeader, monthlyRows);
+      var projectTableCsvRows = projectTableRows.map(function (p) { return [p.name, p.status, p.trend, p.thisMonthVal.toFixed(2), p.total.toFixed(2)]; });
+      var combinedRows = monthlyRows.concat([[]], [['Project', 'Status', 'Trend L6M', 'Monthly revenue', 'L6M total']], projectTableCsvRows);
+      registerDownload('clientDeepDive', 'client-deep-dive-' + selected.replace(/\s+/g, '-').toLowerCase() + '-' + fileSlug() + '.csv', monthlyHeader, combinedRows);
 
       return '<section class="oc-panel">' + panelHeadWithTools('Client deep dive', 'clientDeepDive') +
         '<div class="oc-panel-sub">What\'s driving revenue for a client, last 6 months</div>' +
         '<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:18px;">' + scopeToggle +
           '<select class="oc-filter-select" id="oc-client-deep-dive-select" style="color:var(--fg1); border-color:var(--rule); background:var(--bg); padding:6px 10px; border-radius:var(--radius-md);">' + clientOptionsHtml + '</select></div>' +
-        cardsHtml + graphsHtml + '</section>';
+        cardsHtml + graphsHtml +
+        '<div style="margin-top:24px; padding-top:20px; border-top:1px solid var(--rule);"><div class="oc-multiple-label" style="margin-bottom:12px;">Project breakdown · last 6 months</div>' + projectTableHtml + '</div>' +
+        '</section>';
     }
 
     function renderClientsPage() {
@@ -3187,6 +3240,7 @@
       (RAW.refProjects || []).forEach(function (r) { if (r.Project_Name) m[r.Project_Name] = r; });
       return m;
     }
+    var MARGINS_VIEW_OPTIONS = [{ key: 'projects', label: 'Projects' }, { key: 'clients', label: 'Clients' }];
     function renderProjectsPage() {
       var b = periodBounds();
       var cardFactRows = cardPeriodRows(RAW.unifiedFact || [], 'month_date', 'entity');
@@ -3216,13 +3270,38 @@
       var newCount = projectRows.filter(function (r) { return r.status === 'New'; }).length;
       var activeCount = projectRows.filter(function (r) { return r.status === 'Active' || r.status === 'New'; }).length;
       var rolledOffCount = projectRows.filter(function (r) { return r.status === 'Rolled off'; }).length;
-      var totalRevenue = projectRows.reduce(function (s, r) { return s + r.revenue; }, 0);
+      var billedProjectCount = projectRows.filter(function (r) { return r.revenue > 0; }).length;
+      var avgRevenuePerProject = billedProjectCount ? projectRows.reduce(function (s, r) { return s + r.revenue; }, 0) / billedProjectCount : null;
+
+      // ---- Comparison-period stats (same classification, shifted window) for the delta badges ----
+      var cmpTargetMonth = cardComparisonTargetMonth();
+      var cmpProjectRows = cmpTargetMonth ? groupSum(cmpFactRows, 'project_name', 'total_revenue').map(function (r) {
+        var ref = refLookup[r.label];
+        var status = haveRefData ? classifyProjectStatus(ref, cmpTargetMonth, addMonths(cmpTargetMonth, 1), r.value) : (r.value > 0 ? 'Active' : 'Inactive');
+        return { revenue: r.value, status: status };
+      }) : [];
+      var cmpNewCount = cmpProjectRows.filter(function (r) { return r.status === 'New'; }).length;
+      var cmpActiveCount = cmpProjectRows.filter(function (r) { return r.status === 'Active' || r.status === 'New'; }).length;
+      var cmpRolledOffCount = cmpProjectRows.filter(function (r) { return r.status === 'Rolled off'; }).length;
+      var cmpBilledProjectCount = cmpProjectRows.filter(function (r) { return r.revenue > 0; }).length;
+      var cmpAvgRevenuePerProject = cmpBilledProjectCount ? cmpProjectRows.reduce(function (s, r) { return s + r.revenue; }, 0) / cmpBilledProjectCount : null;
+
+      function pctBadgeP(cur, cmp, valueFmt) {
+        if (cur == null || !cmp) return '';
+        valueFmt = valueFmt || signedCount;
+        var diff = cur - cmp, d = (diff / cmp) * 100;
+        return '<span class="oc-badge ' + (d > 0 ? 'up' : d < 0 ? 'down' : 'neutral') + '">' + valueFmt(diff) + ' (' + fmtDelta(d) + ') ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase() + '</span>';
+      }
+      var activeBadge = pctBadgeP(activeCount, cmpActiveCount);
+      var newBadge = pctBadgeP(newCount, cmpNewCount);
+      var rolledOffBadge = pctBadgeP(rolledOffCount, cmpRolledOffCount);
+      var avgRevBadge = pctBadgeP(avgRevenuePerProject, cmpAvgRevenuePerProject, signedCurrency);
 
       var cardsHtml = '<section class="oc-kpi-grid">' +
-        '<div class="oc-kpi-card"><div class="oc-kpi-label">Active projects</div><div class="oc-kpi-value">' + activeCount + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
-        '<div class="oc-kpi-card"><div class="oc-kpi-label">New projects</div><div class="oc-kpi-value">' + newCount + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
-        '<div class="oc-kpi-card"><div class="oc-kpi-label">Rolled off</div><div class="oc-kpi-value">' + rolledOffCount + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
-        '<div class="oc-kpi-card"><div class="oc-kpi-label">Total revenue</div><div class="oc-kpi-value">' + fmtCurrency(totalRevenue) + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div></section>';
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Active projects</div><div class="oc-kpi-value">' + activeCount + '</div><div class="oc-kpi-delta-row">' + activeBadge + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">New projects</div><div class="oc-kpi-value">' + newCount + '</div><div class="oc-kpi-delta-row">' + newBadge + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Rolled off projects</div><div class="oc-kpi-value">' + rolledOffCount + '</div><div class="oc-kpi-delta-row">' + rolledOffBadge + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Avg revenue / project</div><div class="oc-kpi-value">' + (avgRevenuePerProject != null ? fmtCurrency(avgRevenuePerProject) : '—') + '</div><div class="oc-kpi-delta-row">' + avgRevBadge + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div></section>';
 
       var refNote = haveRefData ? '' : '<div class="oc-note" style="margin-bottom:16px; border-left:3px solid var(--oc-coral); padding-left:12px; background:#fff;">&#9888; Project lifecycle status (New / Rolled off) needs the data_ref_projects query, which is new and not yet verified against the live semantic model — showing revenue-based Active/Inactive only.</div>';
 
@@ -3246,9 +3325,22 @@
         '<div style="display:grid; grid-template-columns:1.6fr 1.1fr 1fr 0.8fr 0.9fr; gap:8px; padding:0 10px 8px; font-size:11px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:var(--fg3); border-bottom:1px solid var(--rule);"><div>Project</div><div>Client</div><div>Revenue</div><div>' + COMPARE_PREFIX[STATE.compareBasis] + '</div><div>Status</div></div>' +
         tableRows + '</section>';
 
-      var marginNote = renderNotReadyPanel('Gross margin by project', 'Needs gross_margin and project_code on the data_powerbi_unified_fact query, which are not yet included in this app\'s query to avoid regressing already-working pages.');
+      // ---- Gross margin $ by project/client ----
+      if (!STATE.marginsView) STATE.marginsView = 'projects';
+      var groupField = STATE.marginsView === 'clients' ? 'client_name' : 'project_name';
+      var marginRows = groupSum(cardFactRows, groupField, 'gross_margin');
+      var marginCmpMap = toValueMap(groupSum(cmpFactRows, groupField, 'gross_margin'));
+      registerDownload('marginsRanked', 'margin-by-' + STATE.marginsView + '-' + fileSlug() + '.csv', [STATE.marginsView === 'clients' ? 'Client' : 'Project', 'Gross margin', COMPARE_PREFIX[STATE.compareBasis]],
+        marginRows.map(function (i) { return [i.label, i.value.toFixed(2), marginCmpMap[i.label] != null ? marginCmpMap[i.label].toFixed(2) : '']; }));
+      var marginSection = '<section class="oc-panel">' +
+        '<div class="oc-panel-head"><h3 class="oc-panel-title">Gross margin $ by ' + (STATE.marginsView === 'clients' ? 'client' : 'project') + '</h3>' +
+          '<div style="display:flex; align-items:center; gap:8px;"><button class="oc-icon-btn" data-download="marginsRanked" title="Download data">&#8595;</button></div></div>' +
+        '<div class="oc-panel-sub" style="margin-bottom:14px;">' + cardPeriodLabelText() + '</div>' +
+        '<div style="margin-bottom:14px;">' + renderPillToggle(MARGINS_VIEW_OPTIONS, 'marginsView') + '</div>' +
+        renderRangedBarList(marginRows, fmtCurrency, 'marginsRankedRange', marginCmpMap, COMPARE_PREFIX[STATE.compareBasis], true) +
+        '</section>';
 
-      return refNote + cardsHtml + listSection + marginNote;
+      return refNote + cardsHtml + listSection + marginSection;
     }
 
     // ---- Employees page ----
