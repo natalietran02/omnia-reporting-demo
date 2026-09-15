@@ -143,6 +143,7 @@
   .oc-kpi-card { background: var(--bg); border: 1px solid var(--rule); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); padding: 18px 18px 16px; flex: 1 1 160px; min-width: 160px; }
   .oc-kpi-clickable { cursor: pointer; transition: box-shadow 120ms ease; }
   .oc-kpi-clickable:hover { box-shadow: var(--shadow-2); }
+  .oc-kpi-card.muted { opacity: 0.55; }
   .oc-kpi-label { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg3); margin-bottom: 10px; }
   .oc-kpi-value { font-size: clamp(16px, 2.1vw, 26px); font-weight: 800; color: var(--fg1); letter-spacing: -0.01em; overflow-wrap: break-word; line-height: 1.15; }
   .oc-kpi-delta-row { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
@@ -588,6 +589,21 @@
       "    \"ExpirationDate\", data_certifications[ExpirationDate]\n" +
       ")";
 
+    // Single source of truth for which DAX queries loadReport() runs, in
+    // order — also doubles as the catalog the Health page reports against
+    // (see QUERY_HEALTH below), so a query added/removed here automatically
+    // shows up there too instead of needing a second list kept in sync.
+    var DAX_QUERIES = [
+      { key: 'revenueTarget',  label: 'Revenue vs target',      query: Q_REVENUE_TARGET },
+      { key: 'unifiedFact',    label: 'Project/client fact',    query: Q_PROJECT_FACT },
+      { key: 'hubspotDeals',   label: 'HubSpot deals',          query: Q_DEALS },
+      { key: 'utilisation',    label: 'Utilisation',            query: Q_UTILISATION },
+      { key: 'certifications', label: 'Certifications',         query: Q_CERTIFICATIONS },
+      { key: 'pl',             label: 'P&L (data_pl)',          query: Q_PL },
+      { key: 'employeeRoster', label: 'Employee roster',        query: Q_EMPLOYEE_ROSTER },
+      { key: 'refProjects',    label: 'Reference projects',     query: Q_REF_PROJECTS },
+    ];
+
     var msalApp = new msal.PublicClientApplication({
       auth: {
         clientId: CLIENT_ID,
@@ -712,13 +728,24 @@
     // resolves to an empty row set instead of throwing and aborting every
     // query after it, so one bad query can never take down data that was
     // already working.
-    async function executeDaxQueries(token, queries) {
+    // QUERY_HEALTH[key] -> { label, ok, rows, error } for the Health page —
+    // populated as a side effect of the same load every page already
+    // depends on, so it always reflects the most recent real fetch attempt
+    // rather than a separate probe that could drift from what's actually loaded.
+    var QUERY_HEALTH = {};
+
+    async function executeDaxQueries(token, defs) {
       var results = [];
-      for (var i = 0; i < queries.length; i++) {
+      for (var i = 0; i < defs.length; i++) {
+        var def = defs[i];
         try {
-          results.push(await executeDaxQuery(token, queries[i]));
+          var rows = await executeDaxQuery(token, def.query);
+          QUERY_HEALTH[def.key] = { label: def.label, ok: true, rows: rows.length, error: null };
+          results.push(rows);
         } catch (e) {
-          console.warn('DAX query #' + i + ' failed, continuing with an empty result set:', e && e.message ? e.message : e);
+          var msg = e && e.message ? e.message : String(e);
+          console.warn('DAX query "' + def.key + '" failed, continuing with an empty result set:', msg);
+          QUERY_HEALTH[def.key] = { label: def.label, ok: false, rows: 0, error: msg };
           results.push([]);
         }
       }
@@ -1044,6 +1071,7 @@
       { key: 'cost', label: 'Cost' },
       { key: 'utilisation', label: 'Utilisation' },
       { key: 'certifications', label: 'Alliances' },
+      { key: 'health', label: 'Health', adminOnly: true },
     ];
 
     var COMPARE_PREFIX = {
@@ -1221,7 +1249,8 @@
       projectsSelect.onchange = function () { STATE.projectsFilter = projectsSelect.value; renderPage(); };
 
       var navEl = document.getElementById('oc-nav');
-      navEl.innerHTML = NAV_ITEMS.map(function (n) {
+      var visibleNavItems = NAV_ITEMS.filter(function (n) { return !n.adminOnly || STATE.isAccessAdmin; });
+      navEl.innerHTML = visibleNavItems.map(function (n) {
         return '<button class="oc-nav-btn' + (n.key === STATE.page ? ' active' : '') + '" data-page="' + n.key + '">' + n.label + '</button>';
       }).join('');
       Array.prototype.forEach.call(navEl.querySelectorAll('.oc-nav-btn'), function (btn) {
@@ -3749,6 +3778,189 @@
       return plDataNote + cardsHtml + costTrendHtml + categoryHtml;
     }
 
+    // ---- Health page (admin only) ----
+    // Mirrors the Apps Script version's KPI row, adapted for a static SPA
+    // with no server: "Sheet tabs healthy" becomes "Data queries healthy"
+    // (one entry per DAX_QUERIES def, populated into QUERY_HEALTH as a side
+    // effect of the same load every other page already depends on), and
+    // "Latest data period" is derived client-side from RAW.revenueTarget —
+    // same freshness math as runHealthCheck() in Code.js. There is no AI
+    // integration in this app (no server to hold an API key, no billed
+    // calls to track), so those two cards stay permanently muted rather
+    // than reporting a real number.
+    function computeHealthSummary() {
+      var queryKeys = DAX_QUERIES.map(function (d) { return d.key; });
+      var queriesOk = queryKeys.filter(function (k) { return QUERY_HEALTH[k] && QUERY_HEALTH[k].ok; }).length;
+      var queriesTotal = queryKeys.length;
+
+      var latestPeriod = null, daysSinceUpdate = null;
+      var dates = (RAW && RAW.revenueTarget || []).map(function (r) { return r.month_date; }).filter(Boolean).sort(function (a, b) { return a - b; });
+      if (dates.length) {
+        var latest = dates[dates.length - 1];
+        latestPeriod = latest.getFullYear() + '-' + String(latest.getMonth() + 1).padStart(2, '0');
+        // Anchor to the first day of the FOLLOWING month, same as
+        // runHealthCheck() in Code.js, so the "days ago" clock starts once
+        // the period actually closes rather than on its first day.
+        var followingMonthStart = new Date(latest.getFullYear(), latest.getMonth() + 1, 1);
+        daysSinceUpdate = Math.floor((new Date() - followingMonthStart) / 86400000);
+      }
+
+      var allQueriesOk = queriesTotal > 0 && queriesOk === queriesTotal;
+      var dataFresh = daysSinceUpdate !== null && daysSinceUpdate < 40;
+      var status = (allQueriesOk && dataFresh) ? 'ok' : 'error';
+
+      return {
+        status: status, queriesOk: queriesOk, queriesTotal: queriesTotal,
+        latestPeriod: latestPeriod, daysSinceUpdate: daysSinceUpdate,
+      };
+    }
+
+    // Same default thresholds as Code.js's runDataChecks() fallbacks
+    // (cfgNum('check_gp_min', 0) etc.) — this app has no config sheet to
+    // override them from, so they're fixed constants here instead.
+    var HEALTH_CHECK_DEFAULTS = { gpMin: 0, gpMax: 80, utilMax: 110, momDropPct: 40 };
+
+    function periodOf(dateVal) {
+      var d = dateVal instanceof Date ? dateVal : new Date(dateVal);
+      if (isNaN(d.getTime())) return '';
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    }
+    function isBlankValue(v) { return v === '' || v === null || v === undefined; }
+
+    // Rules-based data sanity checks, ported from Code.js's runDataChecks() —
+    // same 3 checks (revenue MoM drop, GP% bounds, utilisation bounds), but
+    // run over the entities the live semantic model actually returned
+    // (COMBINED_ENTITIES) rather than a hardcoded OpCo list, and the
+    // utilisation check reads straight from data_utilisation's raw
+    // invoiced/available days (there is no data_key_metrics_monthly query
+    // here to cross-check against instead).
+    function runDataQualityChecks() {
+      var issues = [], warnings = [];
+      var cfg = HEALTH_CHECK_DEFAULTS;
+      var entities = COMBINED_ENTITIES.length ? COMBINED_ENTITIES : ENTITIES.filter(function (e) { return e !== COMBINED_ENTITY_LABEL; });
+
+      // Same purpose as Code.js's FY_START/FY_END/inFyScope: without this,
+      // a forecast-only future period (real target, no real cost/margin
+      // yet) can get flagged as a GP%/utilisation anomaly or a bogus
+      // revenue "drop" purely because it's incomplete, not because
+      // anything is actually wrong. Only an upper bound is applied (no
+      // FY_START-style lower bound) — this app has no config-driven
+      // "current period" to anchor a hardcoded start year against, and the
+      // documented purpose above is about excluding the future, not the past.
+      var scopeEnd = periodOf(currentMonthWithData());
+      var inScope = function (p) { return !scopeEnd || p <= scopeEnd; };
+
+      // Each check below is isolated in its own try/catch — same reason as
+      // Code.js's per-check try/catch: one section's data being malformed
+      // shouldn't take down the other two checks along with it.
+      try {
+        entities.forEach(function (entity) {
+          var byPeriod = {};
+          (RAW.revenueTarget || []).filter(function (r) { return r.entity === entity; }).forEach(function (r) {
+            var p = periodOf(r.month_date);
+            if (!p) return;
+            byPeriod[p] = (byPeriod[p] || 0) + (Number(r.total_revenue) || 0);
+          });
+          var periods = Object.keys(byPeriod).sort().filter(inScope);
+          if (!periods.length) { warnings.push(entity + ': no revenue-vs-target data found'); return; }
+          for (var i = 1; i < periods.length; i++) {
+            var prev = byPeriod[periods[i - 1]], curr = byPeriod[periods[i]];
+            if (prev > 0 && curr > 0) {
+              var change = (curr - prev) / prev;
+              if (change < -(cfg.momDropPct / 100)) {
+                warnings.push(entity + ': revenue dropped ' + Math.abs(change * 100).toFixed(0) + '% from ' + periods[i - 1] + ' to ' + periods[i]);
+              }
+            }
+          }
+        });
+      } catch (e) {
+        issues.push('Failed to check revenue vs target: ' + (e && e.message ? e.message : e));
+      }
+
+      try {
+        entities.forEach(function (entity) {
+          var gpByPeriod = {};
+          (RAW.pl || []).filter(function (r) { return r.Omnia_Company === entity; }).forEach(function (r) {
+            var p = periodOf(r.month);
+            if (!p || isBlankValue(r.direct_costs_actual)) return; // cost not entered yet — don't treat as $0
+            gpByPeriod[p] = gpByPeriod[p] || { rev: 0, gp: 0 };
+            var rev = Number(r.revenue_actual) || 0;
+            gpByPeriod[p].rev += rev;
+            gpByPeriod[p].gp += rev + (Number(r.direct_costs_actual) || 0); // direct_costs_actual is negative
+          });
+          if (!Object.keys(gpByPeriod).length) { warnings.push('No P&L data found for ' + entity + ' — GP% check skipped'); return; }
+          Object.keys(gpByPeriod).filter(inScope).forEach(function (p) {
+            var b = gpByPeriod[p];
+            if (b.rev <= 0) return;
+            var gpPct = (b.gp / b.rev) * 100;
+            if (gpPct < cfg.gpMin || gpPct > cfg.gpMax) {
+              issues.push(entity + ' ' + p + ': GP% is ' + gpPct.toFixed(1) + '% (expected ' + cfg.gpMin + '–' + cfg.gpMax + '%)');
+            }
+          });
+        });
+      } catch (e) {
+        warnings.push('Could not check GP% from data_pl: ' + (e && e.message ? e.message : e));
+      }
+
+      try {
+        entities.forEach(function (entity) {
+          var byPeriodUtil = {};
+          (RAW.utilisation || []).filter(function (r) { return r.Omnia_Company === entity; }).forEach(function (r) {
+            var p = periodOf(r.month);
+            if (!p) return;
+            byPeriodUtil[p] = byPeriodUtil[p] || { billed: 0, max: 0 };
+            byPeriodUtil[p].billed += Number(r.invoiced_days) || 0;
+            byPeriodUtil[p].max += Number(r.available_days) || 0;
+          });
+          if (!Object.keys(byPeriodUtil).length) { warnings.push('No utilisation data found for ' + entity + ' — utilisation check skipped'); return; }
+          Object.keys(byPeriodUtil).filter(inScope).forEach(function (p) {
+            var b = byPeriodUtil[p];
+            if (b.max <= 0) return;
+            var utilPct = (b.billed / b.max) * 100;
+            if (utilPct < 0 || utilPct > cfg.utilMax) {
+              issues.push(entity + ' ' + p + ': utilisation is ' + utilPct.toFixed(1) + '% (expected 0–' + cfg.utilMax + '%)');
+            }
+          });
+        });
+      } catch (e) {
+        warnings.push('Could not check utilisation from data_utilisation: ' + (e && e.message ? e.message : e));
+      }
+
+      return { issues: issues, warnings: warnings };
+    }
+
+    function renderHealthPage() {
+      if (!STATE.isAccessAdmin) return renderNotReadyPanel('Health', 'Admin access required.');
+      var h = computeHealthSummary();
+      var checks = runDataQualityChecks();
+
+      var kpiHtml = '<section class="oc-kpi-grid">' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Overall status</div><div class="oc-kpi-value">' + (h.status === 'ok' ? 'OK' : 'Issues') + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Data queries healthy</div><div class="oc-kpi-value">' + h.queriesOk + ' / ' + h.queriesTotal + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Latest data period</div><div class="oc-kpi-value">' + (h.latestPeriod || '—') + '</div>' +
+          (h.daysSinceUpdate != null ? '<div class="oc-caption">' + h.daysSinceUpdate + ' days ago</div>' : '') + '</div>' +
+        '<div class="oc-kpi-card muted" title="No AI integration in this app — nothing to report"><div class="oc-kpi-label">Anthropic API key</div><div class="oc-kpi-value" style="font-size:16px;">Not configured</div></div>' +
+        '<div class="oc-kpi-card muted" title="No AI integration in this app — nothing to report"><div class="oc-kpi-label">AI spend — today</div><div class="oc-kpi-value" style="font-size:16px;">N/A</div></div>' +
+        '<div class="oc-kpi-card muted" title="No AI integration in this app — nothing to report"><div class="oc-kpi-label">AI spend — this month</div><div class="oc-kpi-value" style="font-size:16px;">N/A</div></div>' +
+      '</section>';
+
+      var tabsHtml = '<table class="oc-table"><thead><tr><th>Query</th><th>Status</th><th>Rows</th></tr></thead><tbody>' +
+        DAX_QUERIES.map(function (d) {
+          var q = QUERY_HEALTH[d.key];
+          var statusCell = !q ? '—' : q.ok ? 'OK' : 'Error: ' + escHtml(q.error || '');
+          return '<tr><td>' + escHtml(d.label) + '</td><td>' + statusCell + '</td><td>' + (q ? q.rows : '—') + '</td></tr>';
+        }).join('') + '</tbody></table>';
+
+      var checksHtml = (checks.issues.length === 0 && checks.warnings.length === 0)
+        ? '<div class="oc-caption">No data quality issues found.</div>'
+        : checks.issues.map(function (i) { return '<div style="color:var(--oc-negative); font-size:13px; margin-bottom:6px;">&#10007; ' + escHtml(i) + '</div>'; }).join('') +
+          checks.warnings.map(function (w) { return '<div style="color:var(--oc-coral); font-size:13px; margin-bottom:6px;">&#9888; ' + escHtml(w) + '</div>'; }).join('');
+
+      return kpiHtml +
+        '<section class="oc-panel"><h3 class="oc-panel-title">Data queries</h3>' + tabsHtml + '</section>' +
+        '<section class="oc-panel"><h3 class="oc-panel-title">Data quality</h3>' + checksHtml + '</section>';
+    }
+
     // ---- Page dispatch (Phase 2 will replace each remaining placeholder
     // with a real ported render*Page function, one nav item at a time) ----
     function goToPage(pageKey) {
@@ -3779,6 +3991,8 @@
         el.innerHTML = renderMarginsPage();
       } else if (STATE.page === 'cost') {
         el.innerHTML = renderCostPage();
+      } else if (STATE.page === 'health') {
+        el.innerHTML = renderHealthPage();
       } else {
         var navItem = NAV_ITEMS.filter(function (n) { return n.key === STATE.page; })[0];
         el.innerHTML = renderPlaceholderPage(navItem ? navItem.label : STATE.page);
@@ -3828,9 +4042,7 @@
     async function loadReport(token) {
       document.getElementById("oc-placeholder").style.display = "none";
       document.getElementById("oc-loading").style.display = "block";
-      var results = await executeDaxQueries(token, [
-        Q_REVENUE_TARGET, Q_PROJECT_FACT, Q_DEALS, Q_UTILISATION, Q_CERTIFICATIONS, Q_PL, Q_EMPLOYEE_ROSTER, Q_REF_PROJECTS,
-      ]);
+      var results = await executeDaxQueries(token, DAX_QUERIES);
       var data = {
         revenueTarget: parseRevenueRows(results[0]),
         unifiedFact: parseProjectRows(results[1]),
