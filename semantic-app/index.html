@@ -431,14 +431,14 @@
       "    data_powerbi_unified_fact[entity],\n" +
       "    data_powerbi_unified_fact[client_name],\n" +
       "    data_powerbi_unified_fact[client_industry],\n" +
+      "    data_powerbi_unified_fact[Project_Code],\n" +
       "    data_powerbi_unified_fact[Project_Name],\n" +
       "    data_powerbi_unified_fact[project_stream],\n" +
       "    \"TotalRevenue\", SUM(data_powerbi_unified_fact[total_revenue]),\n" +
       // Added to unlock gross-margin breakdowns (Client Deep Dive, Projects
       // page) and the FTE/avg-daily-rate figures Client Deep Dive is missing —
       // pure additive SUM measures on the same table/grain as TotalRevenue
-      // above, column names per Code.js's TABS.unifiedFact comment, not yet
-      // confirmed against the live model.
+      // above. Confirmed against the live model via INFO.VIEW.COLUMNS().
       "    \"GrossMargin\", SUM(data_powerbi_unified_fact[gross_margin]),\n" +
       "    \"Headcount\", SUM(data_powerbi_unified_fact[headcount]),\n" +
       "    \"TotalDays\", SUM(data_powerbi_unified_fact[total_days])\n" +
@@ -511,7 +511,7 @@
     var Q_PL =
       "EVALUATE\n" +
       "SUMMARIZECOLUMNS(\n" +
-      "    data_pl[month],\n" +
+      "    data_pl[Month],\n" +
       "    data_pl[Omnia_Company],\n" +
       "    \"RevenueActual\", SUM(data_pl[revenue_actual]),\n" +
       "    \"RevenueBudget\", SUM(data_pl[revenue_budget]),\n" +
@@ -544,7 +544,7 @@
       "    \"HeadcountBudget\", AVERAGE(data_pl[headcount_budget]),\n" +
       "    \"DailyRateBudget\", AVERAGE(data_pl[daily_rate_budget])\n" +
       ")\n" +
-      "ORDER BY data_pl[month]";
+      "ORDER BY data_pl[Month]";
 
     var Q_EMPLOYEE_ROSTER =
       "EVALUATE\n" +
@@ -1357,11 +1357,25 @@
       el.innerHTML = COMPARE_PREFIX[STATE.compareBasis] + ' — <strong>' + monthYYLabel(cmpMonth) + '</strong>';
     }
 
+    // These project codes represent non-billable/unallocated time — they
+    // should never appear in revenue, headcount, or breakdown figures
+    // (ported from Code.js's identical constant/check). No current caller
+    // in this app passes includeNonBillable=true (same is true in Code.js
+    // itself — grepped, no real call site does), so this is always
+    // enforced today, but the override is kept for parity in case a
+    // cost-inclusive panel (e.g. Gross margin $ by project/client) is
+    // ported later.
+    var NON_BILLABLE_PROJECT_CODES = ['NON-BILLABLE/UNALLOCATED', 'NON-BILLABLE', 'UNALLOCATED'];
+    function isExcludedProjectRow(r) {
+      return Object.prototype.hasOwnProperty.call(r, 'project_code') && NON_BILLABLE_PROJECT_CODES.indexOf(r.project_code) !== -1;
+    }
+
     // ---- Row filtering (mirrors the Apps Script engine's rowsForMonths) ----
-    function rowsForMonths(rows, dateField, entityField, monthDates) {
+    function rowsForMonths(rows, dateField, entityField, monthDates, includeNonBillable) {
       var keySet = {}; monthDates.forEach(function (m) { keySet[monthKey(m)] = true; });
       return rows.filter(function (r) {
         if (entityField && !entityMatches(r[entityField])) return false;
+        if (!includeNonBillable && isExcludedProjectRow(r)) return false;
         if (STATE.divisionFilter !== 'all' && Object.prototype.hasOwnProperty.call(r, 'project_stream') && r.project_stream !== STATE.divisionFilter) return false;
         if (STATE.projectsFilter === 'ai' && Object.prototype.hasOwnProperty.call(r, 'project_stream') && (r.project_stream || '').toLowerCase() !== 'ai') return false;
         var d = r[dateField];
@@ -1371,21 +1385,21 @@
         return !!keySet[monthKey(firstOfMonth(dt))];
       });
     }
-    function cardPeriodRows(rows, dateField, entityField) {
-      return rowsForMonths(rows, dateField, entityField, cardMonths());
+    function cardPeriodRows(rows, dateField, entityField, includeNonBillable) {
+      return rowsForMonths(rows, dateField, entityField, cardMonths(), includeNonBillable);
     }
-    function cardComparisonRows(rows, dateField, entityField) {
-      return rowsForMonths(rows, dateField, entityField, cardComparisonMonths());
+    function cardComparisonRows(rows, dateField, entityField, includeNonBillable) {
+      return rowsForMonths(rows, dateField, entityField, cardComparisonMonths(), includeNonBillable);
     }
-    function currentPeriodRows(rows, dateField, entityField) {
+    function currentPeriodRows(rows, dateField, entityField, includeNonBillable) {
       var b = periodBounds();
       if (!b) return [];
-      return rowsForMonths(rows, dateField, entityField, b.months);
+      return rowsForMonths(rows, dateField, entityField, b.months, includeNonBillable);
     }
-    function comparisonPeriodRows(rows, dateField, entityField) {
+    function comparisonPeriodRows(rows, dateField, entityField, includeNonBillable) {
       var cmp = comparisonBounds();
       if (!cmp) return [];
-      return rowsForMonths(rows, dateField, entityField, cmp.months);
+      return rowsForMonths(rows, dateField, entityField, cmp.months, includeNonBillable);
     }
 
     // ---- Chart label sizing ----
@@ -1618,6 +1632,7 @@
           entity: r["data_powerbi_unified_fact[entity]"],
           client_industry: r["data_powerbi_unified_fact[client_industry]"] || "Unspecified",
           client_name: r["data_powerbi_unified_fact[client_name]"] || "Unknown",
+          project_code: r["data_powerbi_unified_fact[Project_Code]"] || "",
           project_name: r["data_powerbi_unified_fact[Project_Name]"] || "Unspecified",
           project_stream: r["data_powerbi_unified_fact[project_stream]"] || "Unspecified",
           total_revenue: r["[TotalRevenue]"] || 0,
@@ -1682,7 +1697,7 @@
     function parsePlRows(rows) {
       return rows.map(function (r) {
         return {
-          month: r["data_pl[month]"],
+          month: r["data_pl[Month]"],
           Omnia_Company: r["data_pl[Omnia_Company]"],
           revenue_actual: r["[RevenueActual]"], revenue_budget: r["[RevenueBudget]"],
           gross_margin_actual: r["[GrossMarginActual]"], gross_margin_forecast: r["[GrossMarginForecast]"], gp_budget: r["[GpBudget]"],
@@ -2497,7 +2512,7 @@
         '<span style="display:flex; align-items:center; gap:6px;"><span style="width:16px; height:0; border-top:2px dashed var(--oc-coral); display:inline-block;"></span>Target</span></div>';
       registerDownload('revenueForecast', 'revenue-forecast-' + fileSlug() + '.csv', ['Month', 'Known revenue', 'Target'], allMonths.map(function (m) { return [monthYearLabel(m), monthActual(m).toFixed(2), monthTarget(m).toFixed(2)]; }));
 
-      var factRowsForecast = (RAW.unifiedFact || []).filter(function (r) { return entityMatches(r.entity); });
+      var factRowsForecast = (RAW.unifiedFact || []).filter(function (r) { return entityMatches(r.entity) && !isExcludedProjectRow(r); });
       var horizonRowsAll = rowsForMonths(factRowsForecast, 'month_date', null, allMonths);
       var forecastClientSet = {};
       horizonRowsAll.forEach(function (r) { if (r.client_name) forecastClientSet[r.client_name] = true; });
@@ -2655,7 +2670,7 @@
     }
 
     function renderClientDeepDivePanel() {
-      var factAll = (RAW.unifiedFact || []).filter(function (r) { return entityMatches(r.entity); });
+      var factAll = (RAW.unifiedFact || []).filter(function (r) { return entityMatches(r.entity) && !isExcludedProjectRow(r); });
       var b = periodBounds();
       var cur = b ? b.end : currentMonthWithData();
       var last6 = MONTH_UNIVERSE.filter(function (m) { return m <= cur; }).slice(-6);
@@ -2677,7 +2692,7 @@
       var l6Margin = weightedMarginPctSafe(last6Rows);
       var l6Fte = last6.length ? last6Rows.reduce(function (s, r) { return s + (Number(r.headcount) || 0); }, 0) / last6.length : null;
       var activeProjects = {};
-      rowsForMonths(selectedRowsAll, 'month_date', null, [cur]).forEach(function (r) { if (r.project_name && (Number(r.total_revenue) || 0) > 0) activeProjects[r.project_name] = true; });
+      rowsForMonths(selectedRowsAll, 'month_date', null, [cur]).forEach(function (r) { if (r.project_code && (Number(r.total_revenue) || 0) > 0) activeProjects[r.project_code] = true; });
       var activeProjectCount = Object.keys(activeProjects).length;
 
       var cardsHtml = '<div style="display:grid; grid-template-columns:repeat(5, 1fr); gap:12px; margin-bottom:20px;">' +
@@ -2726,26 +2741,26 @@
           (rateHasData ? renderSparklineCard({ label: 'Blended avg daily rate', color: 'var(--oc-deep-teal)', fmt: fmtCurrencyCompact }, rateSeries, last6) : oneLinerHtml('Blended avg daily rate', 'No total_days data for this client in the last 6 months.')) +
         '</div></div>';
 
-      // ---- Project breakdown table (last 6 months) — keyed by project_name
-      // since project_code isn't fetched here (unlike the Apps Script engine,
-      // which keys by project_code); fine in practice as long as project
-      // names are unique within a client. ----
+      // ---- Project breakdown table (last 6 months) — keyed by project_code
+      // (matching Code.js's projectKeys), now that it's available from
+      // Q_PROJECT_FACT. Falls back to the project name only for rows with no
+      // code, so nothing silently disappears if a row is ever missing one. ----
       var refLookup = refProjectLookup();
-      var projectNames = {};
-      last6Rows.forEach(function (r) { if (r.project_name) projectNames[r.project_name] = true; });
+      var projectKeys = {};
+      last6Rows.forEach(function (r) { var k = r.project_code || r.project_name; if (k) projectKeys[k] = r.project_name || k; });
       var lastMonthKey = monthKey(last6[last6.length - 1]);
       var prevMonthKey = last6.length > 1 ? monthKey(last6[last6.length - 2]) : null;
       var projPeriodStart = last6[0];
       var projPeriodEnd = addMonths(last6[last6.length - 1], 1);
-      var projectTableRows = Object.keys(projectNames).map(function (name) {
-        var projRows = last6Rows.filter(function (r) { return r.project_name === name; });
+      var projectTableRows = Object.keys(projectKeys).map(function (code) {
+        var projRows = last6Rows.filter(function (r) { return (r.project_code || r.project_name) === code; });
         var total = projRows.reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0);
         var thisMonthVal = projRows.filter(function (r) { return monthKey(firstOfMonth(new Date(r.month_date))) === lastMonthKey; }).reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0);
         var prevMonthVal = prevMonthKey ? projRows.filter(function (r) { return monthKey(firstOfMonth(new Date(r.month_date))) === prevMonthKey; }).reduce(function (s, r) { return s + (Number(r.total_revenue) || 0); }, 0) : 0;
         var trend = thisMonthVal > prevMonthVal ? '▲' : thisMonthVal < prevMonthVal ? '▼' : '—';
         var trendColor = thisMonthVal > prevMonthVal ? 'var(--oc-mint-deep)' : thisMonthVal < prevMonthVal ? 'var(--oc-coral)' : 'var(--fg3)';
-        var status = classifyProjectStatus(refLookup[name], projPeriodStart, projPeriodEnd, thisMonthVal);
-        return { name: name, status: status, trend: trend, trendColor: trendColor, thisMonthVal: thisMonthVal, total: total };
+        var status = classifyProjectStatus(refLookup[code], projPeriodStart, projPeriodEnd, thisMonthVal);
+        return { name: projectKeys[code], status: status, trend: trend, trendColor: trendColor, thisMonthVal: thisMonthVal, total: total };
       }).sort(function (a, b) { return b.total - a.total; });
       var projectTableHtml = projectTableRows.length
         ? '<table class="oc-table"><thead><tr><th>Project</th><th>Status</th><th>Trend L6M</th><th style="text-align:right;">Monthly revenue</th><th style="text-align:right;">L6M total</th></tr></thead><tbody>' +
@@ -2778,7 +2793,7 @@
     function renderClientsPage() {
       var b = periodBounds();
       var cardFactRows = cardPeriodRows(RAW.unifiedFact || [], 'month_date', 'entity');
-      var factAll = (RAW.unifiedFact || []).filter(function (r) { return entityMatches(r.entity); });
+      var factAll = (RAW.unifiedFact || []).filter(function (r) { return entityMatches(r.entity) && !isExcludedProjectRow(r); });
 
       var clientFirstMonth = {};
       factAll.forEach(function (r) {
@@ -3264,9 +3279,13 @@
     // ---- Projects page ----
     var PROJECT_STATUS_COLORS = { 'New': 'var(--oc-mint-deep)', 'Active': 'var(--oc-mid-teal)', 'Rolled off': 'var(--oc-coral)', 'Inactive': '#a8b8b8' };
     var PROJECTS_STATUS_FILTER_OPTIONS = [{ key: 'all', label: 'All' }, { key: 'New', label: 'New' }, { key: 'Active', label: 'Active' }, { key: 'Rolled off', label: 'Rolled off' }];
+    // Keyed by Project_Code (matching Code.js's refByCode) — project_code is
+    // now available from Q_PROJECT_FACT, so this no longer needs to fall
+    // back to name-keying, which risked merging two distinct projects that
+    // happened to share a display name for the same client.
     function refProjectLookup() {
       var m = {};
-      (RAW.refProjects || []).forEach(function (r) { if (r.Project_Name) m[r.Project_Name] = r; });
+      (RAW.refProjects || []).forEach(function (r) { if (r.Project_Code) m[r.Project_Code] = r; });
       return m;
     }
     var MARGINS_VIEW_OPTIONS = [{ key: 'projects', label: 'Projects' }, { key: 'clients', label: 'Clients' }];
@@ -3274,23 +3293,37 @@
       var b = periodBounds();
       var cardFactRows = cardPeriodRows(RAW.unifiedFact || [], 'month_date', 'entity');
       var cmpFactRows = cardComparisonRows(RAW.unifiedFact || [], 'month_date', 'entity');
-      var factAll = (RAW.unifiedFact || []).filter(function (r) { return entityMatches(r.entity); });
+      var factAll = (RAW.unifiedFact || []).filter(function (r) { return entityMatches(r.entity) && !isExcludedProjectRow(r); });
       var refLookup = refProjectLookup();
       var haveRefData = (RAW.refProjects || []).length > 0;
 
-      var revByProject = groupSum(cardFactRows, 'project_name', 'total_revenue');
-      var cmpRevByProject = toValueMap(groupSum(cmpFactRows, 'project_name', 'total_revenue'));
+      // Keyed by project_code (matching Code.js's byCode) rather than
+      // project_name — two distinct projects sharing a display name for the
+      // same client used to get silently merged into one row. Falls back to
+      // project_name only for the rare row with no code, so nothing is
+      // silently dropped.
+      function withProjectKey(rows) {
+        return rows.map(function (r) {
+          var key = r.project_code || r.project_name;
+          return key === r.project_code ? r : Object.assign({}, r, { project_code: key });
+        });
+      }
+      var nameByProject = {};
+      cardFactRows.forEach(function (r) { var k = r.project_code || r.project_name; if (k && !nameByProject[k]) nameByProject[k] = r.project_name || k; });
+
+      var revByProject = groupSum(withProjectKey(cardFactRows), 'project_code', 'total_revenue');
+      var cmpRevByProject = toValueMap(groupSum(withProjectKey(cmpFactRows), 'project_code', 'total_revenue'));
       var clientByProject = {};
-      cardFactRows.forEach(function (r) { if (r.project_name && !clientByProject[r.project_name]) clientByProject[r.project_name] = r.client_name; });
+      cardFactRows.forEach(function (r) { var k = r.project_code || r.project_name; if (k && !clientByProject[k]) clientByProject[k] = r.client_name; });
       var streamByProject = {};
-      cardFactRows.forEach(function (r) { if (r.project_name && !streamByProject[r.project_name]) streamByProject[r.project_name] = r.project_stream; });
+      cardFactRows.forEach(function (r) { var k = r.project_code || r.project_name; if (k && !streamByProject[k]) streamByProject[k] = r.project_stream; });
 
       var cur = b ? b.end : currentMonthWithData();
       var periodStart = cur, periodEnd = addMonths(cur, 1);
       var projectRows = revByProject.map(function (r) {
         var ref = refLookup[r.label];
         var status = haveRefData ? classifyProjectStatus(ref, periodStart, periodEnd, r.value) : (r.value > 0 ? 'Active' : 'Inactive');
-        return { name: r.label, client: clientByProject[r.label] || 'Unknown', stream: streamByProject[r.label] || 'Unknown', revenue: r.value, cmpRevenue: cmpRevByProject[r.label] || 0, status: status };
+        return { name: nameByProject[r.label] || r.label, client: clientByProject[r.label] || 'Unknown', stream: streamByProject[r.label] || 'Unknown', revenue: r.value, cmpRevenue: cmpRevByProject[r.label] || 0, status: status };
       }).sort(function (a, b) { return b.revenue - a.revenue; });
 
       if (!STATE.projectsStatusFilter) STATE.projectsStatusFilter = 'all';
@@ -3304,7 +3337,7 @@
 
       // ---- Comparison-period stats (same classification, shifted window) for the delta badges ----
       var cmpTargetMonth = cardComparisonTargetMonth();
-      var cmpProjectRows = cmpTargetMonth ? groupSum(cmpFactRows, 'project_name', 'total_revenue').map(function (r) {
+      var cmpProjectRows = cmpTargetMonth ? groupSum(withProjectKey(cmpFactRows), 'project_code', 'total_revenue').map(function (r) {
         var ref = refLookup[r.label];
         var status = haveRefData ? classifyProjectStatus(ref, cmpTargetMonth, addMonths(cmpTargetMonth, 1), r.value) : (r.value > 0 ? 'Active' : 'Inactive');
         return { revenue: r.value, status: status };
