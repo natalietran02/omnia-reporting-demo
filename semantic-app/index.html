@@ -448,7 +448,21 @@
       "    \"DealStage\", data_hubspot_deals[Deal_Stage],\n" +
       "    \"Confidence\", data_hubspot_deals[Confidence],\n" +
       "    \"CloseDate\", data_hubspot_deals[Close_Date],\n" +
-      "    \"Amount\", data_hubspot_deals[Amount]\n" +
+      "    \"Amount\", data_hubspot_deals[Amount],\n" +
+      // Added to unlock the Deals page's probability breakdown, stalled/aging
+      // deals, new-deals trend, weighted pipeline, and lost-reasons sections —
+      // same table as every column above, column names taken from Code.gs's
+      // documented header, but not yet confirmed against the live model
+      // (same caveat as the Phase 1 additions below).
+      "    \"OpenDate\", data_hubspot_deals[Open_Date],\n" +
+      "    \"LastUpdated\", data_hubspot_deals[Last_Updated],\n" +
+      "    \"DealProbability\", data_hubspot_deals[Deal_Probability],\n" +
+      "    \"DealLostReason\", data_hubspot_deals[Deal_Lost_Reason],\n" +
+      "    \"IsStalled\", data_hubspot_deals[Is_Stalled],\n" +
+      "    \"StageEnteredDate\", data_hubspot_deals[Stage_Entered_Date],\n" +
+      "    \"WeightedOpenPipeline\", data_hubspot_deals[Weighted_Open_Pipeline],\n" +
+      "    \"AlliancePartners\", data_hubspot_deals[Alliance_Partners],\n" +
+      "    \"LoggedInPartnerPortal\", data_hubspot_deals[Logged_In_Partner_Portal]\n" +
       ")";
 
     // Row-level utilisation: KPIs need distinct-user and monthly-average math that
@@ -1583,6 +1597,15 @@
           Deal_Stage: r["[DealStage]"],
           Close_Date: r["[CloseDate]"],
           Amount: r["[Amount]"] || 0,
+          Open_Date: r["[OpenDate]"],
+          Last_Updated: r["[LastUpdated]"],
+          Deal_Probability: r["[DealProbability]"],
+          Deal_Lost_Reason: r["[DealLostReason]"] || "",
+          Is_Stalled: r["[IsStalled]"],
+          Stage_Entered_Date: r["[StageEnteredDate]"],
+          Weighted_Open_Pipeline: r["[WeightedOpenPipeline]"] || 0,
+          Alliance_Partners: r["[AlliancePartners]"] || "",
+          Logged_In_Partner_Portal: r["[LoggedInPartnerPortal]"] || "",
         };
       }).filter(function (r) { return r.Close_Date && !isNaN(new Date(r.Close_Date)); });
     }
@@ -3151,7 +3174,7 @@
         '<div class="oc-kpi-card"><div class="oc-kpi-label">% logged in partner portal</div><div class="oc-kpi-value">' + (pctLoggedInPortal != null ? fmtPct(pctLoggedInPortal) : '—') + '</div><div class="oc-caption" style="margin-top:6px;">Of alliance-tagged opportunities</div></div></section>' +
         '<section class="oc-panel">' + panelHeadWithToolsAndExtra('Alliance breakdown', 'allianceBreakdown', renderPillToggle(ALLIANCE_BREAKDOWN_OPTIONS, 'allianceBreakdownView')) + '<div class="oc-panel-sub" style="margin-top:-4px;">' + breakdownScopeCaption + '</div>' + renderAlliancePieChart(activeBreakdown, totalDeals, 'TOTAL', pieColLabel) + '</section>';
 
-      var note = allianceDeals.length === 0 ? '<div class="oc-note" style="margin-bottom:16px; border-left:3px solid var(--oc-coral); padding-left:12px; background:#fff;">&#9888; Alliance_Partners/Logged_In_Partner_Portal fields aren\'t queried from the semantic model yet, so this breakdown is empty until Phase 1 widens the deals query.</div>' : '';
+      var note = allianceDeals.length === 0 ? '<div class="oc-note" style="margin-bottom:16px; border-left:3px solid var(--oc-coral); padding-left:12px; background:#fff;">&#9888; No deals tagged with a known alliance partner (Databricks, Microsoft, Snowflake) were found for this filter.</div>' : '';
       var certificationsSectionHtml = STATE.entity === COMBINED_ENTITY_LABEL ? buildCertificationsSectionHtml() : '';
       return note + allianceCardsHtml + certificationsSectionHtml;
     }
