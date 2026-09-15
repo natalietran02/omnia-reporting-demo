@@ -4134,6 +4134,28 @@
       return runFieldCompletenessChecks().concat([runEntityConsistencyChecks(), runProjectJoinCheck()]);
     }
 
+    // Fixed, deterministic rows — not real checks, always the same
+    // regardless of live data — so the three visual treatments (pass,
+    // warning, error) can be confirmed on the page itself at a glance.
+    // Page-only: deliberately left out of buildHealthEmailHtml() so real
+    // health-check emails aren't muddied with a permanent fake warning/error.
+    function runSelfTestCriteria() {
+      var pass = newCriterion('Checklist self-test — pass', 'error');
+      pass.checked = 1;
+
+      var warn = newCriterion('Checklist self-test — warning', 'warning');
+      warn.checked = 1;
+      warn.failed = 1;
+      warn.messages.push('Fixed demo row, not a real data issue — confirms the amber "warning" treatment renders correctly.');
+
+      var fail = newCriterion('Checklist self-test — fail', 'error');
+      fail.checked = 1;
+      fail.failed = 1;
+      fail.messages.push('Fixed demo row, not a real data issue — confirms the red "error" treatment renders correctly.');
+
+      return [pass, warn, fail];
+    }
+
     // Synthetic failing criteria for the Health page's "Simulate" buttons —
     // same purpose as Code.js's test_data_alert SCENARIOS: exercise the
     // email format end-to-end without needing a real data problem. Only
@@ -4311,7 +4333,7 @@
         '<section class="oc-panel"><h3 class="oc-panel-title">Data queries</h3>' + tabsHtml + '</section>' +
         '<section class="oc-panel"><h3 class="oc-panel-title">Data quality</h3>' +
           '<div class="oc-panel-sub">Automated checks across business metrics and the underlying data pipeline, confirming the figures are sound and the source tables are correctly linked.</div>' +
-          renderCriteriaChecklist(checks.concat(appChecks)) +
+          renderCriteriaChecklist(checks.concat(appChecks).concat(runSelfTestCriteria())) +
         '</section>' +
         '<section class="oc-panel" style="opacity:0.6;" title="No AI integration in this app — nothing to report"><h3 class="oc-panel-title">AI commentary</h3>' +
           '<div class="oc-caption">Not configured — this app has no AI integration to generate anomaly commentary from.</div>' +
