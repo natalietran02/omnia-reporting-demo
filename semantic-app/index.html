@@ -4105,7 +4105,33 @@
       return c2;
     }
 
-    // 3) Project join-miss rate — % of unifiedFact rows carrying a
+    // 3) OpCo coverage — Code.js hardcodes 4 operating companies (ENTITIES
+    // in Code.js:2166), one of which (Fernway Data) is a more recent
+    // addition to the Google Sheets side and, as of this check being
+    // written, hasn't been migrated into the Power BI semantic model at
+    // all (confirmed empty in data_powerbi_unified_fact, data_revenue_target,
+    // and data_pl alike — not a join/casing bug, genuinely absent). This is
+    // the one place this app hardcodes the expected OpCo list, specifically
+    // to catch that migration gap; every other check in this app discovers
+    // entities dynamically from the data on purpose.
+    var EXPECTED_ENTITIES = ['Solace Advisory', 'Kestrel Group', 'Northlight AI', 'Fernway Data'];
+
+    function runEntityCoverageCheck() {
+      var c2b = newCriterion('All expected operating companies present in this semantic model', 'warning');
+      c2b.checked = 1;
+      var present = {};
+      (COMBINED_ENTITIES || []).forEach(function (e) { present[e] = true; });
+      var missing = EXPECTED_ENTITIES.filter(function (e) { return !present[e]; });
+      if (missing.length) {
+        c2b.failed = 1;
+        c2b.messages.push((missing.length === 1 ? missing[0] : missing.join(', ')) +
+          (missing.length === 1 ? ' is' : ' are') + ' not represented anywhere in this semantic model yet — every page in this app is silently scoped to only ' +
+          (COMBINED_ENTITIES || []).length + ' of the ' + EXPECTED_ENTITIES.length + ' operating companies Apps Script reports on');
+      }
+      return c2b;
+    }
+
+    // 4) Project join-miss rate — % of unifiedFact rows carrying a
     // project_code that has no matching data_ref_projects row. Ported
     // conceptually from nothing in particular; it's here because this is
     // exactly the join we found broken (project_code missing entirely)
@@ -4131,7 +4157,7 @@
     }
 
     function runAppSpecificChecks() {
-      return runFieldCompletenessChecks().concat([runEntityConsistencyChecks(), runProjectJoinCheck()]);
+      return runFieldCompletenessChecks().concat([runEntityConsistencyChecks(), runEntityCoverageCheck(), runProjectJoinCheck()]);
     }
 
     // Synthetic failing criteria for the Health page's "Simulate" buttons —
