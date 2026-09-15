@@ -3973,10 +3973,125 @@
       return { issues: issues, warnings: warnings };
     }
 
+    // ---- App-specific checks (NOT a Code.js port) ----
+    // runDataQualityChecks() above checks whether the BUSINESS numbers make
+    // sense (margin/utilisation in range, revenue not cratering) — the same
+    // question Apps Script asks, since Sheets data can be wrong in those
+    // ways too. But this app has a failure mode Apps Script structurally
+    // cannot: Power BI's executeQueries API can silently return a
+    // different casing for a column than the query asked for, with no
+    // error — confirmed firsthand this session for data_pl's Month,
+    // Project_Code, and Project_Name, each of which silently fell back to
+    // a placeholder value in every row until caught by a screenshot and a
+    // live sample-row diagnostic. These three checks are built to catch
+    // that class of bug going forward, automatically.
+
+    // 1) Fallback/placeholder rate — a field that ALWAYS falls back to its
+    // default is the exact fingerprint the project_name bug had (100% of
+    // rows read "Unspecified"). The first 4 are unaliased SUMMARIZECOLUMNS
+    // group-by columns (the category proven to mismatch casing on this
+    // API); the last 3 use an explicit SELECTCOLUMNS alias, which isn't
+    // subject to that specific risk, so a high rate there more likely
+    // means genuinely sparse source data than a code bug.
+    var FIELD_COMPLETENESS_CHECKS = [
+      { table: 'unifiedFact', field: 'client_industry', placeholder: 'Unspecified', likelyBug: true },
+      { table: 'unifiedFact', field: 'client_name', placeholder: 'Unknown', likelyBug: true },
+      { table: 'unifiedFact', field: 'project_name', placeholder: 'Unspecified', likelyBug: true },
+      { table: 'unifiedFact', field: 'project_stream', placeholder: 'Unspecified', likelyBug: true },
+      { table: 'hubspotDeals', field: 'Confidence', placeholder: 'Unspecified', likelyBug: false },
+      { table: 'utilisation', field: 'employment_basis', placeholder: 'Unspecified', likelyBug: false },
+      { table: 'certifications', field: 'TrainingTitle', placeholder: 'Unspecified', likelyBug: false },
+    ];
+    var FALLBACK_RATE_THRESHOLD = 0.5; // flag once half or more of rows fell back
+
+    function runFieldCompletenessChecks() {
+      var issues = [], warnings = [];
+      FIELD_COMPLETENESS_CHECKS.forEach(function (c) {
+        var rows = RAW[c.table] || [];
+        if (!rows.length) return; // no rows at all is already covered by the Data queries panel
+        var fallbackCount = rows.filter(function (r) { return r[c.field] === c.placeholder; }).length;
+        var rate = fallbackCount / rows.length;
+        if (rate < FALLBACK_RATE_THRESHOLD) return;
+        var msg = c.table + '.' + c.field + ': ' + (rate * 100).toFixed(0) + '% of rows (' + fallbackCount + ' of ' + rows.length + ') fell back to "' + c.placeholder + '"' +
+          (c.likelyBug ? ' — likely a query/field-casing mismatch, not missing data (check this column against a live sample row)' : ' — may just be sparse source data, worth a look');
+        if (c.likelyBug) issues.push(msg); else warnings.push(msg);
+      });
+      return { issues: issues, warnings: warnings };
+    }
+
+    // 2) Entity-name consistency across tables — every table here gets
+    // joined to the others by comparing entity/company strings directly in
+    // JS (entityMatches()), not via a DAX relationship. A table whose
+    // entity field uses a name outside the recognized OpCo list would
+    // silently exclude those rows from every page for that entity, with no
+    // error anywhere — this surfaces that instead of leaving it invisible.
+    var ENTITY_FIELD_BY_TABLE = [
+      { table: 'revenueTarget', field: 'entity' },
+      { table: 'unifiedFact', field: 'entity' },
+      { table: 'pl', field: 'Omnia_Company' },
+      { table: 'utilisation', field: 'Omnia_Company' },
+      { table: 'employeeRoster', field: 'Omnia_Company' },
+      { table: 'refProjects', field: 'Omnia_Company' },
+      { table: 'hubspotDeals', field: 'Omnia_Company' },
+    ];
+
+    function runEntityConsistencyChecks() {
+      var issues = [];
+      var known = {};
+      (COMBINED_ENTITIES || []).forEach(function (e) { known[e] = true; });
+      if (!Object.keys(known).length) return { issues: issues, warnings: [] };
+
+      ENTITY_FIELD_BY_TABLE.forEach(function (c) {
+        var rows = RAW[c.table] || [];
+        if (!rows.length) return;
+        var unknownCounts = {};
+        rows.forEach(function (r) {
+          var v = r[c.field];
+          if (v && !known[v]) unknownCounts[v] = (unknownCounts[v] || 0) + 1;
+        });
+        Object.keys(unknownCounts).forEach(function (v) {
+          issues.push(c.table + '.' + c.field + ' has an unrecognized value "' + v + '" (' + unknownCounts[v] + ' rows) — doesn\'t match any known OpCo, so these rows are silently excluded from every page');
+        });
+      });
+      return { issues: issues, warnings: [] };
+    }
+
+    // 3) Project join-miss rate — % of unifiedFact rows carrying a
+    // project_code that has no matching data_ref_projects row. Ported
+    // conceptually from nothing in particular; it's here because this is
+    // exactly the join we found broken (project_code missing entirely)
+    // earlier this session, and this catches a future regression of it —
+    // e.g. project lifecycle status (New/Active/Rolled off) silently
+    // reading wrong for the unmatched rows.
+    function runProjectJoinCheck() {
+      var warnings = [];
+      var refCodes = {};
+      (RAW.refProjects || []).forEach(function (r) { if (r.Project_Code) refCodes[r.Project_Code] = true; });
+      if (!Object.keys(refCodes).length) return { issues: [], warnings: warnings };
+
+      var withCode = (RAW.unifiedFact || []).filter(function (r) { return r.project_code; });
+      if (!withCode.length) return { issues: [], warnings: warnings };
+      var unmatched = withCode.filter(function (r) { return !refCodes[r.project_code]; });
+      var rate = unmatched.length / withCode.length;
+      if (rate >= 0.3) {
+        warnings.push('data_powerbi_unified_fact.project_code: ' + (rate * 100).toFixed(0) + '% of rows (' + unmatched.length + ' of ' + withCode.length + ') have no matching data_ref_projects row — project lifecycle status (New/Active/Rolled off) will be wrong for these');
+      }
+      return { issues: [], warnings: warnings };
+    }
+
+    function runAppSpecificChecks() {
+      var results = [runFieldCompletenessChecks(), runEntityConsistencyChecks(), runProjectJoinCheck()];
+      return {
+        issues: results.reduce(function (acc, r) { return acc.concat(r.issues); }, []),
+        warnings: results.reduce(function (acc, r) { return acc.concat(r.warnings); }, []),
+      };
+    }
+
     function renderHealthPage() {
       if (!STATE.isAccessAdmin) return renderNotReadyPanel('Health', 'Admin access required.');
       var h = computeHealthSummary();
       var checks = runDataQualityChecks();
+      var appChecks = runAppSpecificChecks();
 
       var kpiHtml = '<section class="oc-kpi-grid">' +
         '<div class="oc-kpi-card"><div class="oc-kpi-label">Overall status</div><div class="oc-kpi-value">' + (h.status === 'ok' ? 'OK' : 'Issues') + '</div></div>' +
@@ -3995,14 +4110,23 @@
           return '<tr><td>' + escHtml(d.label) + '</td><td>' + statusCell + '</td><td>' + (q ? q.rows : '—') + '</td></tr>';
         }).join('') + '</tbody></table>';
 
-      var checksHtml = (checks.issues.length === 0 && checks.warnings.length === 0)
-        ? '<div class="oc-caption">No data quality issues found.</div>'
-        : checks.issues.map(function (i) { return '<div style="color:var(--oc-negative); font-size:13px; margin-bottom:6px;">&#10007; ' + escHtml(i) + '</div>'; }).join('') +
-          checks.warnings.map(function (w) { return '<div style="color:var(--oc-coral); font-size:13px; margin-bottom:6px;">&#9888; ' + escHtml(w) + '</div>'; }).join('');
+      function renderChecksHtml(c) {
+        return (c.issues.length === 0 && c.warnings.length === 0)
+          ? '<div class="oc-caption">No issues found.</div>'
+          : c.issues.map(function (i) { return '<div style="color:var(--oc-negative); font-size:13px; margin-bottom:6px;">&#10007; ' + escHtml(i) + '</div>'; }).join('') +
+            c.warnings.map(function (w) { return '<div style="color:var(--oc-coral); font-size:13px; margin-bottom:6px;">&#9888; ' + escHtml(w) + '</div>'; }).join('');
+      }
 
       return kpiHtml +
         '<section class="oc-panel"><h3 class="oc-panel-title">Data queries</h3>' + tabsHtml + '</section>' +
-        '<section class="oc-panel"><h3 class="oc-panel-title">Data quality</h3>' + checksHtml + '</section>';
+        '<section class="oc-panel"><h3 class="oc-panel-title">Data quality</h3>' +
+          '<div class="oc-panel-sub">Ported from Apps Script\'s runDataChecks() — does the business data look sane (margin/utilisation in range, revenue not cratering).</div>' +
+          renderChecksHtml(checks) +
+        '</section>' +
+        '<section class="oc-panel"><h3 class="oc-panel-title">App-specific checks</h3>' +
+          '<div class="oc-panel-sub">Not from Apps Script — targets failure modes unique to querying a semantic model client-side: silent DAX casing mismatches and broken cross-table joins.</div>' +
+          renderChecksHtml(appChecks) +
+        '</section>';
     }
 
     // ---- Page dispatch (Phase 2 will replace each remaining placeholder
