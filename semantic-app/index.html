@@ -1058,6 +1058,7 @@
       email: null,
       isAccessAdmin: false,
       modal: { kind: null },
+      health: { testEmail: '', testEmailSending: false, testEmailStatus: null },
     };
 
     var NAV_ITEMS = [
@@ -4120,6 +4121,96 @@
       return [runFieldCompletenessChecks(), runEntityConsistencyChecks(), runProjectJoinCheck()];
     }
 
+    // Synthetic failing criteria for the Health page's "Simulate" buttons —
+    // same purpose as Code.js's test_data_alert SCENARIOS: exercise the
+    // email format end-to-end without needing a real data problem. Only
+    // ever appended to the copy of the checklist built for an outgoing
+    // email, never to what's shown on the page itself.
+    var HEALTH_TEST_SCENARIOS = {
+      missing_data: 'TEST — revenue data missing for the current reporting period (no rows in the last 30 days)',
+      stale_data: 'TEST — data_revenue_target last updated 47 days ago (threshold: 40 days)',
+      bad_gp: 'TEST — gross margin is 142% for the current reporting period — likely a sign error in data_pl',
+    };
+
+    // Builds the HTML body for a health-check email. Kept separate from
+    // renderCriteriaChecklist() (used on the page itself) because email
+    // clients don't resolve CSS custom properties — every color here has
+    // to be a literal value.
+    function buildHealthEmailHtml(scenario) {
+      var h = computeHealthSummary();
+      var criteria = runDataQualityChecks().concat(runAppSpecificChecks());
+      if (scenario) {
+        var testCriterion = newCriterion('TEST MODE — simulated alert (not a real data issue)');
+        testCriterion.checked = 1;
+        testCriterion.failed = 1;
+        testCriterion.messages.push(HEALTH_TEST_SCENARIOS[scenario] || HEALTH_TEST_SCENARIOS.missing_data);
+        criteria = criteria.concat([testCriterion]);
+      }
+      var overallOk = h.status === 'ok' && criteria.every(function (c) { return c.failed === 0; });
+
+      var ts = new Date().toLocaleString('en-AU', { timeZone: 'Australia/Sydney' });
+      var statusColor = overallOk ? '#2e7d32' : '#c62828';
+      var statusLabel = overallOk ? 'All clear' : 'Issues detected';
+
+      var html = '<div style="font-family:sans-serif;max-width:680px">';
+      html += '<h2 style="margin-bottom:4px">Omnia Reporting — Health Check' + (scenario ? ' (TEST)' : '') + '</h2>';
+      html += '<p style="margin-top:0;color:#555">' + escHtml(ts) + '</p>';
+      html += '<p><b>Status:</b> <span style="color:' + statusColor + '">' + statusLabel + '</span></p>';
+      html += '<hr>';
+
+      html += '<h3>Data queries</h3>';
+      html += '<p>' + h.queriesOk + ' / ' + h.queriesTotal + ' healthy</p>';
+      html += '<p><b>Latest data period:</b> ' + escHtml(h.latestPeriod || 'unknown') +
+        (h.daysSinceUpdate != null ? ' (' + h.daysSinceUpdate + ' days ago)' : '') + '</p>';
+      html += '<hr>';
+
+      html += '<h3>Data quality</h3>';
+      criteria.forEach(function (c) {
+        var passed = c.checked - c.failed;
+        var ok = c.failed === 0;
+        var color = ok ? '#2e7d32' : '#c62828';
+        var mark = ok ? '&#10003;' : '&#10007;';
+        var countLabel = c.checked === 0 ? 'no data to check' : (passed + ' / ' + c.checked + ' passed');
+        html += '<p style="margin:4px 0;"><span style="color:' + color + '">' + mark + '</span> ' + escHtml(c.label) +
+          ' &mdash; <span style="color:#777">' + countLabel + '</span></p>';
+        if (!ok && c.messages.length) {
+          html += '<ul style="margin:0 0 8px 20px;">' + c.messages.map(function (m) {
+            return '<li style="color:#c62828;font-size:13px;">' + escHtml(m) + '</li>';
+          }).join('') + '</ul>';
+        }
+      });
+      html += '<hr>';
+
+      html += '<h3>AI commentary</h3>';
+      html += '<p style="color:#777">Not available &mdash; this app has no AI integration configured.</p>';
+      html += '</div>';
+      return { html: html, overallOk: overallOk };
+    }
+
+    // Reuses the same Graph token as the feedback flow (it already carries
+    // Mail.Send) — sends from the signed-in admin's own mailbox, same as
+    // sendFeedbackNotificationEmail, since there's no service account here.
+    async function sendHealthTestEmail(email, scenario) {
+      var token = await getFeedbackGraphToken();
+      var built = buildHealthEmailHtml(scenario);
+      var resp = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: {
+            subject: '[' + (built.overallOk ? 'OK' : 'ALERT') + '] Omnia Reporting — Health Check' + (scenario ? ' (TEST)' : ''),
+            body: { contentType: "HTML", content: built.html },
+            toRecipients: [{ emailAddress: { address: email } }],
+          },
+        }),
+      });
+      if (!resp.ok) {
+        var text = await resp.text();
+        throw new Error("Could not send health check email (Graph " + resp.status + "): " + text);
+      }
+      return { ok: built.overallOk, sentTo: email };
+    }
+
     function renderHealthPage() {
       if (!STATE.isAccessAdmin) return renderNotReadyPanel('Health', 'Admin access required.');
       var h = computeHealthSummary();
@@ -4169,12 +4260,64 @@
         }).join('') + '</div>';
       }
 
+      var hs = STATE.health;
+      var adminActionsHtml = '<section class="oc-panel"><h3 class="oc-panel-title">Admin test actions</h3>' +
+        '<div class="oc-panel-sub">Send a live health-check email to verify delivery and formatting, or simulate a failure scenario without touching real data.</div>' +
+        '<label class="oc-field-label">Send to</label>' +
+        '<input class="oc-field-input" id="health-test-email" value="' + escAttr(hs.testEmail) + '" placeholder="you@edgered.com.au">' +
+        '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">' +
+          '<button class="oc-btn oc-btn-ghost" id="health-send-test-email"' + (hs.testEmailSending ? ' disabled' : '') + '>Send test email</button>' +
+          '<button class="oc-btn oc-btn-ghost" data-alert-scenario="missing_data"' + (hs.testEmailSending ? ' disabled' : '') + '>Simulate: missing data</button>' +
+          '<button class="oc-btn oc-btn-ghost" data-alert-scenario="stale_data"' + (hs.testEmailSending ? ' disabled' : '') + '>Simulate: stale data</button>' +
+          '<button class="oc-btn oc-btn-ghost" data-alert-scenario="bad_gp"' + (hs.testEmailSending ? ' disabled' : '') + '>Simulate: bad GP%</button>' +
+        '</div>' +
+        (hs.testEmailStatus ? '<div class="oc-caption" style="margin-top:8px;">' + escHtml(hs.testEmailStatus) + '</div>' : '') +
+      '</section>';
+
       return kpiHtml +
         '<section class="oc-panel"><h3 class="oc-panel-title">Data queries</h3>' + tabsHtml + '</section>' +
         '<section class="oc-panel"><h3 class="oc-panel-title">Data quality</h3>' +
           '<div class="oc-panel-sub">Automated checks across business metrics and the underlying data pipeline, confirming the figures are sound and the source tables are correctly linked.</div>' +
           renderCriteriaChecklist(checks.concat(appChecks)) +
-        '</section>';
+        '</section>' +
+        '<section class="oc-panel" style="opacity:0.6;" title="No AI integration in this app — nothing to report"><h3 class="oc-panel-title">AI commentary</h3>' +
+          '<div class="oc-caption">Not configured — this app has no AI integration to generate anomaly commentary from.</div>' +
+        '</section>' +
+        adminActionsHtml;
+    }
+
+    function wireHealthPage(el) {
+      var hs = STATE.health;
+      var emailInput = el.querySelector('#health-test-email');
+      if (emailInput) emailInput.addEventListener('input', function () { hs.testEmail = emailInput.value; });
+
+      function runTestAction(scenario) {
+        var email = String(hs.testEmail || '').trim();
+        if (!email || email.indexOf('@') === -1) {
+          hs.testEmailStatus = 'Enter a valid email address first.';
+          renderPage();
+          return;
+        }
+        hs.testEmailSending = true;
+        hs.testEmailStatus = null;
+        renderPage();
+        sendHealthTestEmail(email, scenario).then(function (res) {
+          hs.testEmailSending = false;
+          hs.testEmailStatus = 'Sent to ' + res.sentTo + ' (' + (res.ok ? 'all clear' : 'issues flagged') + ')';
+          renderPage();
+        }).catch(function (err) {
+          hs.testEmailSending = false;
+          hs.testEmailStatus = err && err.message ? err.message : String(err);
+          renderPage();
+        });
+      }
+
+      var sendBtn = el.querySelector('#health-send-test-email');
+      if (sendBtn) sendBtn.addEventListener('click', function () { runTestAction(null); });
+
+      el.querySelectorAll('[data-alert-scenario]').forEach(function (btn) {
+        btn.addEventListener('click', function () { runTestAction(btn.getAttribute('data-alert-scenario')); });
+      });
     }
 
     // ---- Page dispatch (Phase 2 will replace each remaining placeholder
@@ -4209,6 +4352,7 @@
         el.innerHTML = renderCostPage();
       } else if (STATE.page === 'health') {
         el.innerHTML = renderHealthPage();
+        wireHealthPage(el);
       } else {
         var navItem = NAV_ITEMS.filter(function (n) { return n.key === STATE.page; })[0];
         el.innerHTML = renderPlaceholderPage(navItem ? navItem.label : STATE.page);
