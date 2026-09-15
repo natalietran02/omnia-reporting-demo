@@ -412,7 +412,7 @@
 
     // ---- DAX queries ----
     // Revenue vs. target: one row per entity/month, both actual and target in the same table.
-    var Q_REVENUE_TARGET =
+    var data_revenue_target =
       "EVALUATE\n" +
       "SUMMARIZECOLUMNS(\n" +
       "    data_revenue_target[month_date],\n" +
@@ -424,7 +424,7 @@
 
     // Project/client/industry/stream revenue mix all come from this one fact table,
     // so a single richer query covers every breakdown used across the three pages.
-    var Q_PROJECT_FACT =
+    var data_powerbi_unified_fact =
       "EVALUATE\n" +
       "SUMMARIZECOLUMNS(\n" +
       "    data_powerbi_unified_fact[month_date],\n" +
@@ -447,7 +447,7 @@
 
     // Deal-level rows: pipeline, win rate, deal size and new-client KPIs are all derived
     // client-side from this, since none of them are pre-aggregated in the model.
-    var Q_DEALS =
+    var data_hubspot_deals =
       "EVALUATE\n" +
       "SELECTCOLUMNS(\n" +
       "    data_hubspot_deals,\n" +
@@ -476,7 +476,7 @@
 
     // Row-level utilisation: KPIs need distinct-user and monthly-average math that
     // isn't a simple SUM, so this pulls raw rows rather than pre-aggregating.
-    var Q_UTILISATION =
+    var data_utilisation =
       "EVALUATE\n" +
       "SELECTCOLUMNS(\n" +
       "    data_utilisation,\n" +
@@ -508,7 +508,7 @@
     // already shown at least one casing deviation from that source
     // (Project_Name above is capitalized in the model but lowercase in the
     // Sheet), so these may need column-name fixes after a live test. ----
-    var Q_PL =
+    var data_pl =
       "EVALUATE\n" +
       "SUMMARIZECOLUMNS(\n" +
       "    data_pl[Month],\n" +
@@ -546,7 +546,7 @@
       ")\n" +
       "ORDER BY data_pl[Month]";
 
-    var Q_EMPLOYEE_ROSTER =
+    var data_employee_roster =
       "EVALUATE\n" +
       "SELECTCOLUMNS(\n" +
       "    data_employee_roster,\n" +
@@ -563,7 +563,7 @@
       "    \"Tenure\", data_employee_roster[tenure]\n" +
       ")";
 
-    var Q_REF_PROJECTS =
+    var data_ref_projects =
       "EVALUATE\n" +
       "SELECTCOLUMNS(\n" +
       "    data_ref_projects,\n" +
@@ -578,7 +578,7 @@
 
     // This table has no OpCo/entity column, so the Certifications page ignores
     // the OpCo filter entirely (there's nothing to filter it by).
-    var Q_CERTIFICATIONS =
+    var data_certifications =
       "EVALUATE\n" +
       "SELECTCOLUMNS(\n" +
       "    data_certifications,\n" +
@@ -594,14 +594,14 @@
     // (see QUERY_HEALTH below), so a query added/removed here automatically
     // shows up there too instead of needing a second list kept in sync.
     var DAX_QUERIES = [
-      { key: 'revenueTarget',  label: 'Revenue vs target',      query: Q_REVENUE_TARGET },
-      { key: 'unifiedFact',    label: 'Project/client fact',    query: Q_PROJECT_FACT },
-      { key: 'hubspotDeals',   label: 'HubSpot deals',          query: Q_DEALS },
-      { key: 'utilisation',    label: 'Utilisation',            query: Q_UTILISATION },
-      { key: 'certifications', label: 'Certifications',         query: Q_CERTIFICATIONS },
-      { key: 'pl',             label: 'P&L (data_pl)',          query: Q_PL },
-      { key: 'employeeRoster', label: 'Employee roster',        query: Q_EMPLOYEE_ROSTER },
-      { key: 'refProjects',    label: 'Reference projects',     query: Q_REF_PROJECTS },
+      { key: 'revenueTarget',  label: 'Revenue vs target',      query: data_revenue_target },
+      { key: 'unifiedFact',    label: 'Project/client fact',    query: data_powerbi_unified_fact },
+      { key: 'hubspotDeals',   label: 'HubSpot deals',          query: data_hubspot_deals },
+      { key: 'utilisation',    label: 'Utilisation',            query: data_utilisation },
+      { key: 'certifications', label: 'Certifications',         query: data_certifications },
+      { key: 'pl',             label: 'P&L (data_pl)',          query: data_pl },
+      { key: 'employeeRoster', label: 'Employee roster',        query: data_employee_roster },
+      { key: 'refProjects',    label: 'Reference projects',     query: data_ref_projects },
     ];
 
     var msalApp = new msal.PublicClientApplication({
@@ -1633,7 +1633,7 @@
           client_industry: r["data_powerbi_unified_fact[client_industry]"] || "Unspecified",
           client_name: r["data_powerbi_unified_fact[client_name]"] || "Unknown",
           // Query/model casing is Project_Code/Project_Name (capitalized —
-          // see Q_PROJECT_FACT) but the executeQueries REST API returns
+          // see data_powerbi_unified_fact) but the executeQueries REST API returns
           // unaliased SUMMARIZECOLUMNS group-by keys using each column's own
           // internal storage-identifier casing, not the model's display
           // name — confirmed lowercase for this model via the Health page's
@@ -1704,7 +1704,7 @@
     function parsePlRows(rows) {
       return rows.map(function (r) {
         return {
-          // Query/model casing is Month (capitalized — see Q_PL) but the
+          // Query/model casing is Month (capitalized — see data_pl) but the
           // executeQueries REST API returns this SUMMARIZECOLUMNS group-by
           // key lowercase regardless (confirmed via the Health page's raw
           // sample-row diagnostic — see the same note in parseProjectRows).
@@ -2754,7 +2754,7 @@
 
       // ---- Project breakdown table (last 6 months) — keyed by project_code
       // (matching Code.js's projectKeys), now that it's available from
-      // Q_PROJECT_FACT. Falls back to the project name only for rows with no
+      // data_powerbi_unified_fact. Falls back to the project name only for rows with no
       // code, so nothing silently disappears if a row is ever missing one. ----
       var refLookup = refProjectLookup();
       var projectKeys = {};
@@ -3137,7 +3137,7 @@
       var roleCodeToTitle = {};
       (RAW.employeeRoster || []).forEach(function (r) { if (r.role_code && r.role_title && !roleCodeToTitle[r.role_code]) roleCodeToTitle[r.role_code] = r.role_title; });
       function roleCodeLookup(code) { return roleCodeToTitle[code] || code; }
-      // Q_UTILISATION doesn't carry business_unit/role_code itself, so every
+      // data_utilisation doesn't carry business_unit/role_code itself, so every
       // row here is joined against the roster (via the userId both queries
       // already fetch) to attach them client-side — mirrors what the Apps
       // Script version gets directly from data_utilisation, without needing
@@ -3291,7 +3291,7 @@
     var PROJECT_STATUS_COLORS = { 'New': 'var(--oc-mint-deep)', 'Active': 'var(--oc-mid-teal)', 'Rolled off': 'var(--oc-coral)', 'Inactive': '#a8b8b8' };
     var PROJECTS_STATUS_FILTER_OPTIONS = [{ key: 'all', label: 'All' }, { key: 'New', label: 'New' }, { key: 'Active', label: 'Active' }, { key: 'Rolled off', label: 'Rolled off' }];
     // Keyed by Project_Code (matching Code.js's refByCode) — project_code is
-    // now available from Q_PROJECT_FACT, so this no longer needs to fall
+    // now available from data_powerbi_unified_fact, so this no longer needs to fall
     // back to name-keying, which risked merging two distinct projects that
     // happened to share a display name for the same client.
     function refProjectLookup() {
