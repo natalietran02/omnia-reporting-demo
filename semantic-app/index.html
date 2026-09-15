@@ -740,12 +740,7 @@
         var def = defs[i];
         try {
           var rows = await executeDaxQuery(token, def.query);
-          // Raw (pre-parse) first row — lets the Health page show exactly
-          // what the REST API returned (key names, date string format,
-          // etc.), since Power BI Desktop's own DAX query view renders
-          // dates for human display, not necessarily the literal JSON the
-          // executeQueries endpoint sends this app.
-          QUERY_HEALTH[def.key] = { label: def.label, ok: true, rows: rows.length, error: null, sample: rows[0] || null };
+          QUERY_HEALTH[def.key] = { label: def.label, ok: true, rows: rows.length, error: null };
           results.push(rows);
         } catch (e) {
           var msg = e && e.message ? e.message : String(e);
@@ -3993,17 +3988,11 @@
         '<div class="oc-kpi-card muted" title="No AI integration in this app — nothing to report"><div class="oc-kpi-label">AI spend — this month</div><div class="oc-kpi-value" style="font-size:16px;">N/A</div></div>' +
       '</section>';
 
-      var tabsHtml = '<table class="oc-table"><thead><tr><th>Query</th><th>Status</th><th>Rows</th><th>Sample row (raw, pre-parse)</th></tr></thead><tbody>' +
+      var tabsHtml = '<table class="oc-table"><thead><tr><th>Query</th><th>Status</th><th>Rows</th></tr></thead><tbody>' +
         DAX_QUERIES.map(function (d) {
           var q = QUERY_HEALTH[d.key];
           var statusCell = !q ? '—' : q.ok ? 'OK' : 'Error: ' + escHtml(q.error || '');
-          // Raw JSON keys/values exactly as the executeQueries REST API
-          // returned them, before parseXRows() renames/reshapes anything —
-          // the fastest way to confirm a query's actual field names/date
-          // format match what the parse function expects, without needing
-          // to inspect the browser's Network tab by hand.
-          var sampleCell = (q && q.sample) ? '<code style="font-size:11px; white-space:pre-wrap; word-break:break-all;">' + escHtml(JSON.stringify(q.sample)) + '</code>' : '<span class="oc-caption">—</span>';
-          return '<tr><td>' + escHtml(d.label) + '</td><td>' + statusCell + '</td><td>' + (q ? q.rows : '—') + '</td><td>' + sampleCell + '</td></tr>';
+          return '<tr><td>' + escHtml(d.label) + '</td><td>' + statusCell + '</td><td>' + (q ? q.rows : '—') + '</td></tr>';
         }).join('') + '</tbody></table>';
 
       var checksHtml = (checks.issues.length === 0 && checks.warnings.length === 0)
