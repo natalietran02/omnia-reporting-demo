@@ -115,6 +115,11 @@
   .oc-compare-select option { color: #111; }
   .oc-compare-dates { font-size: 12px; color: var(--fg-on-dark-3); white-space: nowrap; max-width: 190px; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: middle; }
 
+  .oc-filter-bar { display: flex; align-items: center; gap: 10px; padding: 9px 32px; border-top: 1px solid var(--rule-on-dark); background: rgba(255,255,255,0.04); overflow-x: auto; }
+  .oc-filter-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-on-dark-3); white-space: nowrap; }
+  .oc-filter-select { background: rgba(255,255,255,0.06); color: var(--fg-on-dark-1); border: 1px solid var(--rule-on-dark); border-radius: var(--radius-md); padding: 6px 10px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+  .oc-filter-select option { color: #111; }
+
   .oc-signin-btn {
     background: rgba(255,255,255,0.06); color: var(--fg-on-dark-1); border: 1px solid var(--rule-on-dark);
     border-radius: var(--radius-md); padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap;
@@ -215,6 +220,13 @@
   .oc-aging-table td { padding: 10px 8px 10px 0; border-bottom: 1px solid var(--rule); }
   .oc-aging-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: var(--radius-pill); white-space: nowrap; }
 
+  .oc-funnel-row { display: flex; flex-direction: column; align-items: center; }
+  .oc-funnel-bar { border-radius: var(--radius-md); padding: 12px 16px; text-align: center; color: #fff; width: 100%; }
+  .oc-funnel-title { font-size: 13px; font-weight: 700; overflow-wrap: break-word; }
+  .oc-funnel-sub { font-size: 12px; opacity: 0.9; overflow-wrap: break-word; }
+  .oc-deal-list-row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--rule); font-size: 13px; }
+  .oc-deal-list-row:last-child { border-bottom: none; }
+
   .oc-feedback-fab { position: fixed; bottom: 28px; left: 28px; width: 52px; height: 52px; background: var(--bg-inverse); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: var(--shadow-3); z-index: 400; border: none; transition: transform .2s, box-shadow .2s; }
   .oc-feedback-fab:hover { transform: scale(1.08); }
   .oc-feedback-fab .material-symbols-outlined { color: var(--fg-on-dark-1); font-size: 22px; }
@@ -275,13 +287,13 @@
         </div>
       </div>
       <nav class="oc-nav" id="oc-nav"></nav>
-      <div class="oc-filter-bar" style="display:flex; align-items:center; gap:10px; padding:9px 32px; border-top:1px solid var(--rule-on-dark); background:rgba(255,255,255,0.04); overflow-x:auto;">
-        <span style="font-size:10.5px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--fg-on-dark-3); white-space:nowrap;">Filter</span>
-        <select class="oc-compare-select" style="width:auto;" id="oc-alliance-select" title="Not backed by real data yet">
+      <div class="oc-filter-bar">
+        <span class="oc-filter-label">Filter</span>
+        <select class="oc-filter-select" id="oc-alliance-select" title="Not backed by real data yet">
           <option value="all">All alliances</option>
         </select>
-        <select class="oc-compare-select" style="width:auto;" id="oc-division-select"></select>
-        <select class="oc-compare-select" style="width:auto;" id="oc-projects-select">
+        <select class="oc-filter-select" id="oc-division-select"></select>
+        <select class="oc-filter-select" id="oc-projects-select">
           <option value="all">All projects</option>
           <option value="ai">AI projects</option>
         </select>
@@ -454,7 +466,14 @@
       "    \"InvoicedDays\", data_utilisation[invoiced_days],\n" +
       "    \"LeaveDays\", data_utilisation[leave_days],\n" +
       "    \"UtilisationPct\", data_utilisation[utilisation_pct],\n" +
-      "    \"UserId\", data_utilisation[userId]\n" +
+      "    \"UserId\", data_utilisation[userId],\n" +
+      // Added to unlock the Revenue page's Driver Tree / Waterfall, which need
+      // NWD (available_days ÷ FTE) and billed revenue per employee-month —
+      // same data_utilisation table as every column above, column names taken
+      // from Code.gs's documented header, but not yet confirmed against the
+      // live model (see the Phase 1 note below — same caveat applies here).
+      "    \"AvailableDays\", data_utilisation[available_days],\n" +
+      "    \"BilledAmount\", data_utilisation[billed_amount]\n" +
       ")";
 
     // ---- Phase 1 additions (unverified against the live semantic model —
@@ -1580,6 +1599,8 @@
           leave_days: r["[LeaveDays]"] || 0,
           utilisation_pct: r["[UtilisationPct]"],
           userId: r["[UserId]"],
+          available_days: r["[AvailableDays]"] || 0,
+          billed_amount: r["[BilledAmount]"] || 0,
         };
       }).filter(function (r) { return r.month && !isNaN(new Date(r.month)); });
     }
@@ -2271,7 +2292,7 @@
     function renderRevenueDriverTree() {
       var bridge = buildSupplyDriverBridge();
       if (!bridge || bridge.error) {
-        return renderNotReadyPanel('Revenue driver tree', 'No utilisation driver data found for ' + (bridge ? bridge.missing : 'this period') + ' yet — both the current and comparison month need available-days/billed-amount fields to build a driver bridge (not yet queried from the semantic model).');
+        return renderNotReadyPanel('Revenue driver tree', 'No utilisation rows found for ' + (bridge ? bridge.missing : 'this period') + ' yet — both the current and comparison month need data_utilisation rows to build a driver bridge.');
       }
       var deltaPct = bridge.start ? ((bridge.end - bridge.start) / bridge.start) * 100 : null;
       var arrowUp = deltaPct != null && deltaPct >= 0;
@@ -2317,7 +2338,7 @@
     function renderRevenueWaterfall() {
       var bridge = buildSupplyDriverBridge();
       if (!bridge || bridge.error) {
-        return renderNotReadyPanel('Revenue waterfall', 'No utilisation driver data found for ' + (bridge ? bridge.missing : 'this period') + ' yet — both the current and comparison month need available-days/billed-amount fields to build a waterfall (not yet queried from the semantic model).');
+        return renderNotReadyPanel('Revenue waterfall', 'No utilisation rows found for ' + (bridge ? bridge.missing : 'this period') + ' yet — both the current and comparison month need data_utilisation rows to build a waterfall.');
       }
       var running = bridge.start;
       var points = [{ label: monthYearLabel(cardComparisonMonths()[0]), value: bridge.start, type: 'total' }];
@@ -2985,11 +3006,29 @@
       var roleCodeToTitle = {};
       (RAW.employeeRoster || []).forEach(function (r) { if (r.role_code && r.role_title && !roleCodeToTitle[r.role_code]) roleCodeToTitle[r.role_code] = r.role_title; });
       function roleCodeLookup(code) { return roleCodeToTitle[code] || code; }
-      var byBU = metricByGroup(utilRows, 'business_unit');
-      var byRole = metricByGroup(utilRows, 'role_code', roleCodeLookup);
+      // Q_UTILISATION doesn't carry business_unit/role_code itself, so every
+      // row here is joined against the roster (via the userId both queries
+      // already fetch) to attach them client-side — mirrors what the Apps
+      // Script version gets directly from data_utilisation, without needing
+      // a new DAX column.
+      var rosterByUserId = {};
+      (RAW.employeeRoster || []).forEach(function (r) { if (r.userId) rosterByUserId[r.userId] = r; });
+      function withRosterAttrs(rows) {
+        return rows.map(function (r) {
+          var emp = rosterByUserId[r.userId];
+          if (!emp) return r;
+          var merged = {};
+          for (var k in r) merged[k] = r[k];
+          merged.business_unit = emp.business_unit;
+          merged.role_code = emp.role_code;
+          return merged;
+        });
+      }
+      var byBU = metricByGroup(withRosterAttrs(utilRows), 'business_unit');
+      var byRole = metricByGroup(withRosterAttrs(utilRows), 'role_code', roleCodeLookup);
       var cmpUtilRowsForBreakdown = utilisationRowsForComparison();
-      var cmpByBU = toValueMap(metricByGroup(cmpUtilRowsForBreakdown, 'business_unit'));
-      var cmpByRole = toValueMap(metricByGroup(cmpUtilRowsForBreakdown, 'role_code', roleCodeLookup));
+      var cmpByBU = toValueMap(metricByGroup(withRosterAttrs(cmpUtilRowsForBreakdown), 'business_unit'));
+      var cmpByRole = toValueMap(metricByGroup(withRosterAttrs(cmpUtilRowsForBreakdown), 'role_code', roleCodeLookup));
 
       if (!STATE.utilBreakdownView) STATE.utilBreakdownView = 'businessUnit';
       var breakdownIsRole = STATE.utilBreakdownView === 'role';
@@ -3000,7 +3039,7 @@
       registerDownload('utilTrend', 'utilisation-trend-' + fileSlug() + '.csv', [showingRate ? 'Avg daily rate' : 'Utilisation %', 'Target'], trendMonths.map(function (m, i) { return [monthYearLabel(m), trendSeries[i] != null ? trendSeries[i].toFixed(1) : '', trendTargetSeries[i] != null ? trendTargetSeries[i].toFixed(1) : '']; }));
       registerDownload('utilByBU', 'utilisation-breakdown-' + fileSlug() + '.csv', [breakdownIsRole ? 'Role' : 'Business unit', showingRate ? 'Avg daily rate' : 'Utilisation %', COMPARE_PREFIX[STATE.compareBasis]], breakdownRows.map(function (i) { return [i.label, i.value.toFixed(1), breakdownCmpMap[i.label] != null ? breakdownCmpMap[i.label].toFixed(1) : '']; }));
 
-      var utilInProgressNote = '<div class="oc-note" style="margin-bottom:16px; border-left:3px solid var(--oc-coral); padding-left:12px; background:#fff;">&#9888; ' + (b && isMonthInProgress(b.end) ? 'Utilisation & daily rate isn\'t shown for the current month until it closes. ' : '') + 'Business-unit/role breakdown and targets need fields the current DAX query doesn\'t fetch yet.</div>';
+      var utilInProgressNote = b && isMonthInProgress(b.end) ? '<div class="oc-note" style="margin-bottom:16px; border-left:3px solid var(--oc-coral); padding-left:12px; background:#fff;">&#9888; Utilisation & daily rate isn\'t shown for the current month until it closes.</div>' : '';
 
       return utilInProgressNote + '<section class="oc-kpi-grid">' +
         '<div class="oc-kpi-card"><div class="oc-kpi-label">Utilisation %</div><div class="oc-kpi-value">' + (utilPct != null ? fmtPct(utilPct) : '—') + '</div><div class="oc-kpi-delta-row" style="flex-direction:column; align-items:flex-start; gap:4px;">' +
@@ -3190,7 +3229,12 @@
     }
 
     // ---- Employees page ----
-    var EMPLOYEES_BREAKDOWN_OPTIONS = [{ key: 'business_unit', label: 'Business unit' }, { key: 'role_group', label: 'Role group' }, { key: 'location', label: 'Location' }];
+    var EMPLOYEES_BREAKDOWN_OPTIONS = [
+      { key: 'employment_type', label: 'Employment type' },
+      { key: 'role_group', label: 'Role group' },
+      { key: 'business_unit', label: 'Business unit' },
+      { key: 'location', label: 'Location' },
+    ];
     function activeEmployeeRows(asOfDate) {
       return (RAW.employeeRoster || []).filter(function (r) { return entityMatches(r.Omnia_Company); }).filter(function (r) {
         var start = r.employment_start_date ? new Date(r.employment_start_date) : null;
@@ -3200,6 +3244,142 @@
         return true;
       });
     }
+    // Distinct users with a data_utilisation row that month — same source/
+    // definition the Apps Script engine uses for the Headcount card (roster
+    // point-in-time is used for tenure/churn/breakdown instead, below).
+    function headcountForMonth(m) {
+      var rows = rowsForMonths(RAW.utilisation || [], 'month', 'Omnia_Company', [m]);
+      if (!rows.length) return null;
+      var seen = {};
+      rows.forEach(function (r) { if (r.userId) seen[r.userId] = true; });
+      return Object.keys(seen).length;
+    }
+
+    // ---- Location hierarchy (Country > State > City), ported from the Apps
+    // Script engine's LOCATION_HIERARCHY / renderLocationDonut so the
+    // Location breakdown reads the same way here as it does there ----
+    var LOCATION_HIERARCHY = {
+      'NSW': { country: 'Australia', state: 'NSW', city: null },
+      'VIC': { country: 'Australia', state: 'VIC', city: null },
+      'QLD': { country: 'Australia', state: 'QLD', city: null },
+      'WA': { country: 'Australia', state: 'WA', city: null },
+      'SA': { country: 'Australia', state: 'SA', city: null },
+      'TAS': { country: 'Australia', state: 'TAS', city: null },
+      'NT': { country: 'Australia', state: 'NT', city: null },
+      'ACT': { country: 'Australia', state: 'ACT', city: null },
+      'Sydney': { country: 'Australia', state: 'NSW', city: 'Sydney' },
+      'Melbourne': { country: 'Australia', state: 'VIC', city: 'Melbourne' },
+      'Brisbane': { country: 'Australia', state: 'QLD', city: 'Brisbane' },
+      'Perth': { country: 'Australia', state: 'WA', city: 'Perth' },
+      'Adelaide': { country: 'Australia', state: 'SA', city: 'Adelaide' },
+      'Hobart': { country: 'Australia', state: 'TAS', city: 'Hobart' },
+      'Darwin': { country: 'Australia', state: 'NT', city: 'Darwin' },
+      'Canberra': { country: 'Australia', state: 'ACT', city: 'Canberra' },
+      'Auckland': { country: 'New Zealand', state: null, city: 'Auckland' },
+      'Philippines': { country: 'Philippines', state: null, city: null },
+      'India': { country: 'India', state: null, city: null },
+    };
+    function classifyLocation(raw) {
+      if (!raw || raw === 'Unknown') return null;
+      return LOCATION_HIERARCHY[raw] || { country: raw, state: null, city: null };
+    }
+    function buildLocationHierarchy(rows) {
+      var countries = {}, unknownCount = 0;
+      rows.forEach(function (r) {
+        var cls = classifyLocation(titleCase(r.location));
+        if (!cls) { unknownCount++; return; }
+        countries[cls.country] = countries[cls.country] || { total: 0, states: {} };
+        countries[cls.country].total++;
+        if (cls.state) {
+          countries[cls.country].states[cls.state] = countries[cls.country].states[cls.state] || { total: 0, cities: {} };
+          countries[cls.country].states[cls.state].total++;
+          var cityKey = cls.city || 'Unknown';
+          countries[cls.country].states[cls.state].cities[cityKey] = (countries[cls.country].states[cls.state].cities[cityKey] || 0) + 1;
+        } else if (cls.city) {
+          countries[cls.country].cities = countries[cls.country].cities || {};
+          countries[cls.country].cities[cls.city] = (countries[cls.country].cities[cls.city] || 0) + 1;
+        }
+      });
+      return { countries: countries, unknownCount: unknownCount };
+    }
+    function renderLocationDonut(hierarchy, cmpHierarchy, cmpLabel) {
+      var countryNames = Object.keys(hierarchy.countries).sort(function (a, b) { return hierarchy.countries[b].total - hierarchy.countries[a].total; });
+      var rows = countryNames.map(function (country) { return { label: country, value: hierarchy.countries[country].total }; });
+      if (hierarchy.unknownCount) rows.push({ label: 'Unknown', value: hierarchy.unknownCount });
+      var total = rows.reduce(function (s, r) { return s + r.value; }, 0);
+      var acc = 0;
+      var stops = rows.map(function (r, i) {
+        var startPct = total ? (acc / total) * 100 : 0; acc += r.value;
+        var endPct = total ? (acc / total) * 100 : 0;
+        return DONUT_COLORS[i % DONUT_COLORS.length] + ' ' + startPct.toFixed(1) + '% ' + endPct.toFixed(1) + '%';
+      });
+      var gradient = stops.length ? 'conic-gradient(' + stops.join(', ') + ')' : 'var(--bg-muted)';
+      var cols = '1.4fr 0.9fr 0.6fr 0.9fr';
+      function subDetailFor(country) {
+        if (country === 'Unknown') return '';
+        var c = hierarchy.countries[country];
+        var stateNames = Object.keys(c.states || {}).sort(function (a, b) { return c.states[b].total - c.states[a].total; });
+        var cityNames = Object.keys(c.cities || {}).sort(function (a, b) { return c.cities[b] - c.cities[a]; });
+        var lines = [];
+        if (stateNames.length) {
+          stateNames.forEach(function (state) {
+            var s = c.states[state];
+            lines.push({ text: state + ': ' + s.total, indent: 0 });
+            var allCityKeys = Object.keys(s.cities);
+            var isEntirelyUnknown = allCityKeys.length === 1 && allCityKeys[0] === 'Unknown';
+            if (!isEntirelyUnknown) {
+              allCityKeys.sort(function (a, b) { return s.cities[b] - s.cities[a]; }).forEach(function (city) { lines.push({ text: city + ': ' + s.cities[city], indent: 1 }); });
+            }
+          });
+        } else if (cityNames.length) {
+          cityNames.forEach(function (city) { lines.push({ text: city + ': ' + c.cities[city], indent: 0 }); });
+        }
+        return lines.map(function (l) { return '<div style="padding:2px 0 2px ' + (18 + l.indent * 18) + 'px;">' + escHtml(l.text) + '</div>'; }).join('');
+      }
+      var rowsHtml = rows.map(function (r, i) {
+        var pct = total ? (r.value / total) * 100 : 0;
+        var cmpVal = r.label === 'Unknown' ? (cmpHierarchy ? cmpHierarchy.unknownCount : null) : (cmpHierarchy && cmpHierarchy.countries[r.label] ? cmpHierarchy.countries[r.label].total : null);
+        var deltaPct = cmpVal ? ((r.value - cmpVal) / cmpVal) * 100 : null;
+        var cmpHtml = '<div>' + (deltaPct != null ? '<span class="oc-badge ' + (deltaPct > 0 ? 'up' : deltaPct < 0 ? 'down' : 'neutral') + '">' + fmtDelta(deltaPct) + '</span>' : '<span class="oc-caption">—</span>') + '</div>';
+        var sub = subDetailFor(r.label);
+        return '<div style="padding:11px 10px; border-bottom:1px solid var(--rule);">' +
+          '<div style="display:grid; grid-template-columns:' + cols + '; gap:8px; align-items:center;">' +
+            '<div style="font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px;"><span style="width:10px; height:10px; border-radius:50%; background:' + DONUT_COLORS[i % DONUT_COLORS.length] + '; display:inline-block; flex-shrink:0;"></span>' + escHtml(r.label) + '</div>' +
+            '<div style="font-size:13.5px; font-weight:700;">' + r.value + (r.value === 1 ? ' person' : ' people') + '</div>' +
+            '<div style="font-size:12.5px; color:var(--fg3);">' + pct.toFixed(0) + '%</div>' + cmpHtml + '</div>' +
+          (sub ? '<div style="margin-top:4px; font-size:11.5px; color:var(--fg3);">' + sub + '</div>' : '') + '</div>';
+      }).join('');
+      return '<div style="display:grid; grid-template-columns:200px 1fr; gap:28px; align-items:center;">' +
+        '<div style="position:relative; width:160px; height:160px; margin:0 auto;">' +
+          '<div style="width:160px; height:160px; border-radius:50%; background:' + gradient + ';"></div>' +
+          '<div style="position:absolute; top:32px; left:32px; width:96px; height:96px; border-radius:50%; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center;">' +
+            '<div style="font-size:11px; color:var(--fg3); font-weight:600;">HEADCOUNT</div><div style="font-size:15px; font-weight:800;">' + total + '</div></div></div>' +
+        '<div><div style="display:grid; grid-template-columns:' + cols + '; gap:8px; padding:0 10px 8px; font-size:11px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:var(--fg3); border-bottom:1px solid var(--rule);"><div></div><div>Count</div><div>%</div><div>' + cmpLabel + '</div></div>' + rowsHtml + '</div></div>';
+    }
+    function flattenLocationHierarchy(hierarchy, cmpHierarchy) {
+      var out = [];
+      var countryNames = Object.keys(hierarchy.countries).sort(function (a, b) { return hierarchy.countries[b].total - hierarchy.countries[a].total; });
+      countryNames.forEach(function (country) {
+        var c = hierarchy.countries[country];
+        var cc = cmpHierarchy && cmpHierarchy.countries[country];
+        var stateNames = Object.keys(c.states || {});
+        var cityNames = Object.keys(c.cities || {});
+        if (stateNames.length) {
+          stateNames.forEach(function (state) {
+            var s = c.states[state];
+            var cs = cc && cc.states[state];
+            Object.keys(s.cities).forEach(function (city) { out.push([country, state, city, s.cities[city], (cs && cs.cities[city] != null) ? cs.cities[city] : '']); });
+          });
+        } else if (cityNames.length) {
+          cityNames.forEach(function (city) { out.push([country, '', city, c.cities[city], (cc && cc.cities && cc.cities[city] != null) ? cc.cities[city] : '']); });
+        } else {
+          out.push([country, '', '', c.total, cc ? cc.total : '']);
+        }
+      });
+      if (hierarchy.unknownCount) out.push(['Unknown', '', '', hierarchy.unknownCount, (cmpHierarchy && cmpHierarchy.unknownCount) ? cmpHierarchy.unknownCount : '']);
+      return out;
+    }
+
     function renderEmployeesPage() {
       var haveRosterData = (RAW.employeeRoster || []).length > 0;
       if (!haveRosterData) return renderNotReadyPanel('Employees', 'No data_employee_roster rows found — this page reads from the data_employee_roster query, which is new and not yet verified against the live semantic model.');
@@ -3207,46 +3387,127 @@
       var b = periodBounds();
       var cur = b ? b.end : currentMonthWithData();
       var cmpTarget = cardComparisonTargetMonth();
-      var currentHeadcount = activeEmployeeRows(addMonths(cur, 1)).length;
-      var cmpHeadcount = cmpTarget ? activeEmployeeRows(addMonths(cmpTarget, 1)).length : null;
+      var roster = (RAW.employeeRoster || []).filter(function (r) { return entityMatches(r.Omnia_Company); });
+
+      var currentHeadcount = headcountForMonth(cur);
+      var cmpHeadcount = cmpTarget ? headcountForMonth(cmpTarget) : null;
       var cardPl = plSummaryForMonths(cardMonths());
       var headcountTarget = cardPl ? cardPl.headcountBudget : null;
 
-      var newHires = (RAW.employeeRoster || []).filter(function (r) { return entityMatches(r.Omnia_Company); }).filter(function (r) {
+      var billableFte = billableFteForMonths(cardMonths());
+      var cmpBillableFte = billableFteForMonths(cardComparisonMonths());
+
+      var currentRoster = activeEmployeeRows(addMonths(cur, 1));
+      var tenureVals = currentRoster.map(function (r) { return r.tenure; }).filter(function (v) { return v != null && v !== '' && !isNaN(Number(v)); });
+      var avgTenure = tenureVals.length ? tenureVals.reduce(function (s, v) { return s + Number(v); }, 0) / tenureVals.length : null;
+
+      var newHires = roster.filter(function (r) {
         var start = r.employment_start_date ? new Date(r.employment_start_date) : null;
         return start && cardMonths().some(function (m) { return start >= m && start < addMonths(m, 1); });
       }).length;
-      var departures = (RAW.employeeRoster || []).filter(function (r) { return entityMatches(r.Omnia_Company); }).filter(function (r) {
+      var departures = roster.filter(function (r) {
         var term = r.termination_date ? new Date(r.termination_date) : null;
         return term && cardMonths().some(function (m) { return term >= m && term < addMonths(m, 1); });
       }).length;
 
-      function badgeE(cur, cmp) {
-        if (cur == null || !cmp) return '';
-        var diff = cur - cmp, d = (diff / cmp) * 100;
-        return '<span class="oc-badge ' + (d > 0 ? 'up' : d < 0 ? 'down' : 'neutral') + '">' + signedCount(diff, 0) + ' (' + fmtDelta(d) + ') ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase() + '</span>';
+      // Churn rate — trailing 12 months (the same window driving every other
+      // chart on this page), annualized, and averaged against headcount over
+      // that same window rather than a single month, since a monthly rate on
+      // its own swings too wildly to be a meaningful churn figure.
+      var trailing12Months = b ? b.months : [];
+      var trailing12Departures = roster.filter(function (r) {
+        var term = r.termination_date ? new Date(r.termination_date) : null;
+        return term && trailing12Months.some(function (m) { return term >= m && term < addMonths(m, 1); });
+      });
+      var trailing12HeadcountVals = trailing12Months.map(headcountForMonth).filter(function (v) { return v != null; });
+      var avgHeadcountTrailing12 = trailing12HeadcountVals.length ? trailing12HeadcountVals.reduce(function (s, v) { return s + v; }, 0) / trailing12HeadcountVals.length : null;
+      var churnRate = avgHeadcountTrailing12 ? (trailing12Departures.length / avgHeadcountTrailing12) * 100 : null;
+
+      var tenureAtExit = trailing12Departures.map(function (r) {
+        var start = r.employment_start_date ? new Date(r.employment_start_date) : null;
+        var end = r.termination_date ? new Date(r.termination_date) : null;
+        if (!start || !end || isNaN(start) || isNaN(end)) return null;
+        return (end - start) / (1000 * 60 * 60 * 24 * 365.25);
+      }).filter(function (v) { return v != null; });
+      var avgTenureAtExit = tenureAtExit.length ? tenureAtExit.reduce(function (s, v) { return s + v; }, 0) / tenureAtExit.length : null;
+
+      function badgeE(curVal, cmpVal, decimals) {
+        if (curVal == null || !cmpVal) return '';
+        var diff = curVal - cmpVal, d = (diff / cmpVal) * 100;
+        return '<span class="oc-badge ' + (d > 0 ? 'up' : d < 0 ? 'down' : 'neutral') + '">' + signedCount(diff, decimals || 0) + ' (' + fmtDelta(d) + ') ' + COMPARE_PREFIX[STATE.compareBasis].toLowerCase() + '</span>';
+      }
+      var fteTargetBadge = '';
+      if (headcountTarget != null && billableFte != null) {
+        var fteBudgetDeltaAbs = billableFte - headcountTarget;
+        var fteBudgetDelta = (fteBudgetDeltaAbs / headcountTarget) * 100;
+        fteTargetBadge = '<span class="oc-badge ' + (fteBudgetDelta > 0 ? 'up' : fteBudgetDelta < 0 ? 'down' : 'neutral') + '">' + signedCount(fteBudgetDeltaAbs, 1) + ' (' + fmtDelta(fteBudgetDelta) + ') vs target</span>';
       }
 
       var cardsHtml = '<section class="oc-kpi-grid">' +
-        '<div class="oc-kpi-card"><div class="oc-kpi-label">Headcount</div><div class="oc-kpi-value">' + currentHeadcount + '</div><div class="oc-kpi-delta-row">' + badgeE(currentHeadcount, cmpHeadcount) + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + (headcountTarget != null ? ' · target ' + Math.round(headcountTarget) : '') + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Headcount</div><div class="oc-kpi-value">' + (currentHeadcount != null ? currentHeadcount : '—') + '</div><div class="oc-kpi-delta-row">' + badgeE(currentHeadcount, cmpHeadcount) + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + (headcountTarget != null ? ' · target ' + Math.round(headcountTarget) : '') + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Billable FTE</div><div class="oc-kpi-value">' + (billableFte != null ? billableFte.toFixed(1) : '—') + '</div><div class="oc-kpi-delta-row">' + (fteTargetBadge || badgeE(billableFte, cmpBillableFte, 1)) + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Avg tenure</div><div class="oc-kpi-value">' + (avgTenure != null ? avgTenure.toFixed(1) + ' yrs' : '—') + '</div></div>' +
         '<div class="oc-kpi-card"><div class="oc-kpi-label">New hires</div><div class="oc-kpi-value">' + newHires + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
-        '<div class="oc-kpi-card"><div class="oc-kpi-label">Departures</div><div class="oc-kpi-value">' + departures + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div></section>';
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Departures</div><div class="oc-kpi-value">' + departures + '</div><div class="oc-caption" style="margin-top:6px;">' + cardPeriodLabelText() + '</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Churn rate</div><div class="oc-kpi-value">' + (churnRate != null ? fmtPct(churnRate) : '—') + '</div><div class="oc-caption" style="margin-top:6px;">trailing 12 months, annualized</div></div>' +
+        '<div class="oc-kpi-card"><div class="oc-kpi-label">Avg tenure at exit</div><div class="oc-kpi-value">' + (avgTenureAtExit != null ? avgTenureAtExit.toFixed(1) + ' yrs' : '—') + '</div><div class="oc-caption" style="margin-top:6px;">trailing 12 months</div></div></section>';
 
-      var b2 = periodBounds();
-      var headcountSeries = b2 ? b2.months.map(function (m) { return activeEmployeeRows(addMonths(m, 1)).length; }) : [];
-      registerDownload('headcountTrend', 'headcount-trend-' + fileSlug() + '.csv', ['Month', 'Headcount'], (b2 ? b2.months : []).map(function (m, i) { return [monthYearLabel(m), headcountSeries[i]]; }));
-      var trendHtml = '<section class="oc-panel">' + panelHeadWithTools('Headcount trend', 'headcountTrend') +
-        (b2 ? renderSparklineCard({ label: '', color: 'var(--oc-deep-teal)', fmt: function (v) { return Math.round(v); } }, headcountSeries, b2.months) : '') + '</section>';
+      // ---- Billable FTE — actual vs target ----
+      var fteActualSeries = b ? b.months.map(function (m) { return billableFteForMonths([m]); }) : [];
+      var fteTargetSeries = b ? b.months.map(function (m) { var p = plSummaryForMonths([m]); return p ? p.headcountBudget : null; }) : [];
+      registerDownload('fteTrend', 'billable-fte-vs-target-' + fileSlug() + '.csv', ['Month', 'Billable FTE actual', 'Billable FTE target'],
+        (b ? b.months : []).map(function (m, i) { return [monthYearLabel(m), fteActualSeries[i] != null ? fteActualSeries[i].toFixed(1) : '', fteTargetSeries[i] != null ? fteTargetSeries[i].toFixed(1) : '']; }));
+      var fteTrendHtml = '<section class="oc-panel">' + panelHeadWithTools('Billable FTE — actual vs target', 'fteTrend') +
+        (b ? renderSparklineCard({ label: '', color: 'var(--oc-deep-teal)', fmt: function (v) { return v.toFixed(1); }, targetLabel: 'Target' }, fteActualSeries, b.months, null, null, false, fteTargetSeries) : '') + '</section>';
 
-      if (!STATE.employeesBreakdown) STATE.employeesBreakdown = 'business_unit';
+      // ---- New hires vs departures ----
+      var newHiresMonthly = b ? b.months.map(function (m) {
+        return roster.filter(function (r) { var start = r.employment_start_date ? new Date(r.employment_start_date) : null; return start && start >= m && start < addMonths(m, 1); }).length;
+      }) : [];
+      var departuresMonthly = b ? b.months.map(function (m) {
+        return roster.filter(function (r) { var term = r.termination_date ? new Date(r.termination_date) : null; return term && term >= m && term < addMonths(m, 1); }).length;
+      }) : [];
+      registerDownload('newHiresVsDepartures', 'new-hires-vs-departures-' + fileSlug() + '.csv', ['Month', 'New hires', 'Departures'],
+        (b ? b.months : []).map(function (m, i) { return [monthYearLabel(m), newHiresMonthly[i], departuresMonthly[i]]; }));
+      var newHiresSection = '<section class="oc-panel">' + panelHeadWithTools('New hires vs departures', 'newHiresVsDepartures') +
+        (b ? renderSparklineCard({ label: '', color: 'var(--oc-mid-teal)', fmt: function (v) { return Math.round(v); }, actualLabel: 'New hires', targetLabel: 'Departures' }, newHiresMonthly, b.months, null, null, false, departuresMonthly) : '') + '</section>';
+
+      // ---- Employee churn % by month ----
+      var churnMonthly = b ? b.months.map(function (m) {
+        var deps = roster.filter(function (r) { var term = r.termination_date ? new Date(r.termination_date) : null; return term && term >= m && term < addMonths(m, 1); }).length;
+        var monthHeadcount = headcountForMonth(m);
+        return monthHeadcount ? (deps / monthHeadcount) * 100 : null;
+      }) : [];
+      registerDownload('employeeChurn', 'employee-churn-' + fileSlug() + '.csv', ['Month', 'Churn %'],
+        (b ? b.months : []).map(function (m, i) { return [monthYearLabel(m), churnMonthly[i] != null ? churnMonthly[i].toFixed(1) : '']; }));
+      var churnSection = '<section class="oc-panel">' + panelHeadWithTools('Employee churn % by month', 'employeeChurn') +
+        (b ? renderSparklineCard({ label: '', color: 'var(--oc-coral)', fmt: fmtPct }, churnMonthly, b.months) : '') + '</section>';
+
+      // ---- Employee breakdown (donut, 4 dimensions incl. Location hierarchy) ----
+      if (!STATE.employeesBreakdown) STATE.employeesBreakdown = 'employment_type';
       var breakdownField = STATE.employeesBreakdown;
-      var currentRoster = activeEmployeeRows(addMonths(cur, 1));
-      var breakdownRows = groupCount(currentRoster, breakdownField);
-      registerDownload('employeesBreakdown', 'employees-by-' + breakdownField + '-' + fileSlug() + '.csv', ['Category', 'Headcount'], breakdownRows.map(function (r) { return [r.label, r.value]; }));
-      var breakdownHtml = '<section class="oc-panel">' + panelHeadWithToolsAndExtra('Headcount breakdown', 'employeesBreakdown', renderPillToggle(EMPLOYEES_BREAKDOWN_OPTIONS, 'employeesBreakdown')) +
-        '<div class="oc-panel-sub">' + cardPeriodLabelText() + '</div>' + renderBarList(breakdownRows, function (v) { return Math.round(v) + (v === 1 ? ' person' : ' people'); }) + '</section>';
+      var cmpRoster = cmpTarget ? activeEmployeeRows(addMonths(cmpTarget, 1)) : [];
 
-      return cardsHtml + trendHtml + breakdownHtml;
+      var locHierarchy = null, cmpLocHierarchy = null, breakdownRows = [], cmpBreakdownMap = {};
+      if (breakdownField === 'location') {
+        locHierarchy = buildLocationHierarchy(currentRoster);
+        cmpLocHierarchy = buildLocationHierarchy(cmpRoster);
+        registerDownload('employeesBreakdown', 'employees-by-location-' + fileSlug() + '.csv', ['Country', 'State', 'City', 'Headcount', COMPARE_PREFIX[STATE.compareBasis]],
+          flattenLocationHierarchy(locHierarchy, cmpLocHierarchy));
+      } else {
+        breakdownRows = groupCount(currentRoster, breakdownField);
+        cmpBreakdownMap = toValueMap(groupCount(cmpRoster, breakdownField));
+        registerDownload('employeesBreakdown', 'employees-by-' + breakdownField + '-' + fileSlug() + '.csv', ['Category', 'Headcount', COMPARE_PREFIX[STATE.compareBasis]],
+          breakdownRows.map(function (r) { return [r.label, r.value, cmpBreakdownMap[r.label] != null ? cmpBreakdownMap[r.label] : '']; }));
+      }
+      var breakdownHtml = '<section class="oc-panel">' + panelHeadWithToolsAndExtra('Employee breakdown', 'employeesBreakdown', renderPillToggle(EMPLOYEES_BREAKDOWN_OPTIONS, 'employeesBreakdown')) +
+        '<div class="oc-panel-sub">' + cardPeriodLabelText() + '</div>' +
+        (breakdownField === 'location'
+          ? renderLocationDonut(locHierarchy, cmpLocHierarchy, COMPARE_PREFIX[STATE.compareBasis])
+          : renderDonutChart(breakdownRows, function (n) { return n + (n === 1 ? ' person' : ' people'); }, 'HEADCOUNT', cmpBreakdownMap, COMPARE_PREFIX[STATE.compareBasis])) +
+        '</section>';
+
+      return cardsHtml + fteTrendHtml + newHiresSection + churnSection + breakdownHtml;
     }
 
     // ---- Margins page ----
