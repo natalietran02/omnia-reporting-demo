@@ -153,6 +153,26 @@
   .oc-badge.neutral { background: var(--bg-muted); color: var(--fg3); }
   .oc-caption { font-size: 11.5px; color: var(--fg3); }
 
+  .oc-check-summary { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .oc-check-summary .oc-badge { font-size: 12.5px; padding: 4px 10px; }
+  .oc-check-row { display: flex; align-items: flex-start; gap: 12px; border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 6px; background: var(--bg); }
+  .oc-check-row.error { background: var(--oc-coral-soft); }
+  .oc-check-row.warning { background: #FFF3DE; }
+  .oc-check-icon { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #fff; margin-top: 1px; }
+  .oc-check-icon.pass { background: var(--oc-mint-deep); }
+  .oc-check-icon.error { background: var(--oc-negative); }
+  .oc-check-icon.warning { background: #E8971E; }
+  .oc-check-body { flex: 1; min-width: 0; }
+  .oc-check-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .oc-check-label { font-size: 13px; font-weight: 600; color: var(--fg1); }
+  .oc-check-count { font-size: 11.5px; font-weight: 700; color: var(--fg3); background: var(--bg-muted); padding: 2px 8px; border-radius: var(--radius-sm); white-space: nowrap; }
+  .oc-check-row.error .oc-check-count { background: #fff; color: #9c2b1a; }
+  .oc-check-row.warning .oc-check-count { background: #fff; color: #8a5a00; }
+  .oc-check-messages { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+  .oc-check-messages div { font-size: 12px; line-height: 1.4; }
+  .oc-check-row.error .oc-check-messages div { color: #9c2b1a; }
+  .oc-check-row.warning .oc-check-messages div { color: #8a5a00; }
+
   .oc-panel { background: var(--bg); border: 1px solid var(--rule); border-radius: var(--radius-xl); box-shadow: var(--shadow-1); padding: 24px 28px; margin-bottom: 20px; }
   .oc-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
   .oc-panel-title { margin: 0 0 4px; font-size: 20px; font-weight: 600; }
@@ -4187,46 +4207,69 @@
       var overallOk = h.status === 'ok' && criteria.every(function (c) { return c.severity !== 'error' || c.failed === 0; });
 
       var ts = new Date().toLocaleString('en-AU', { timeZone: 'Australia/Sydney' });
-      var statusColor = overallOk ? '#2e7d32' : '#c62828';
+      var statusBg = overallOk ? '#2e7d32' : '#c62828';
       var statusLabel = overallOk ? 'All clear' : 'Issues detected';
 
-      var html = '<div style="font-family:sans-serif;max-width:680px">';
-      html += '<h2 style="margin-bottom:4px">Omnia Reporting — Health Check' + (scenario ? ' (TEST)' : '') + '</h2>';
-      html += '<p style="margin-top:0;color:#555">' + escHtml(ts) + '</p>';
-      html += '<p><b>Status:</b> <span style="color:' + statusColor + '">' + statusLabel + '</span></p>';
-      html += '<hr>';
+      // Table-based layout throughout (rather than flex, used on the page
+      // itself) since this has to render inside actual email clients, not
+      // just a browser — tables and inline styles are the safe subset.
+      var html = '<div style="font-family:sans-serif;max-width:680px;color:#222;">';
 
-      html += '<h3>Data queries</h3>';
-      html += '<p>' + h.queriesOk + ' / ' + h.queriesTotal + ' healthy</p>';
-      html += '<p><b>Latest data period:</b> ' + escHtml(h.latestPeriod || 'unknown') +
-        (h.daysSinceUpdate != null ? ' (' + h.daysSinceUpdate + ' days ago)' : '') + '</p>';
-      html += '<hr>';
+      html += '<div style="background:' + statusBg + ';color:#fff;border-radius:10px;padding:16px 20px;margin-bottom:18px;">' +
+        '<div style="font-size:18px;font-weight:700;">Omnia Reporting &mdash; Health Check' + (scenario ? ' (TEST)' : '') + '</div>' +
+        '<div style="font-size:12px;opacity:0.85;margin-top:2px;">' + escHtml(ts) + '</div>' +
+        '<div style="font-size:14px;font-weight:700;margin-top:10px;">' + statusLabel + '</div>' +
+      '</div>';
 
-      html += '<h3>Data quality</h3>';
+      html += '<h3 style="margin-bottom:6px;">Data queries</h3>';
+      html += '<div style="background:#f5f6f7;border-radius:8px;padding:10px 14px;margin-bottom:18px;font-size:13px;">' +
+        '<div>' + h.queriesOk + ' / ' + h.queriesTotal + ' healthy</div>' +
+        '<div style="margin-top:4px;"><b>Latest data period:</b> ' + escHtml(h.latestPeriod || 'unknown') +
+          (h.daysSinceUpdate != null ? ' (' + h.daysSinceUpdate + ' days ago)' : '') + '</div>' +
+      '</div>';
+
+      html += '<h3 style="margin-bottom:10px;">Data quality</h3>';
+      var passCount = criteria.filter(function (c) { return c.failed === 0; }).length;
       var errorCount = criteria.filter(function (c) { return c.severity === 'error' && c.failed > 0; }).length;
       var warningCount = criteria.filter(function (c) { return c.severity === 'warning' && c.failed > 0; }).length;
-      html += '<p style="color:#555">' + (errorCount || warningCount
-        ? errorCount + ' error' + (errorCount === 1 ? '' : 's') + ', ' + warningCount + ' warning' + (warningCount === 1 ? '' : 's')
-        : 'All checks passed') + '</p>';
+      function pill(bg, fg, text) { return '<span style="display:inline-block;background:' + bg + ';color:' + fg + ';font-size:12px;font-weight:700;padding:4px 10px;border-radius:6px;margin:0 6px 8px 0;">' + text + '</span>'; }
+      html += '<div>' +
+        pill('#e8f5e9', '#2e7d32', '&#10003; ' + passCount + ' passed') +
+        (errorCount ? pill('#fdecea', '#c62828', '&#10007; ' + errorCount + ' error' + (errorCount === 1 ? '' : 's')) : '') +
+        (warningCount ? pill('#FFF3DE', '#8a5a00', '&#9888; ' + warningCount + ' warning' + (warningCount === 1 ? '' : 's')) : '') +
+      '</div>';
+
       criteria.forEach(function (c) {
         var passed = c.checked - c.failed;
         var ok = c.failed === 0;
-        var failColor = c.severity === 'warning' ? '#e65100' : '#c62828';
-        var color = ok ? '#2e7d32' : failColor;
-        var mark = ok ? '&#10003;' : (c.severity === 'warning' ? '&#9888;' : '&#10007;');
+        var rowBg = ok ? '#fff' : (c.severity === 'warning' ? '#FFF3DE' : '#fdecea');
+        var iconBg = ok ? '#2e7d32' : (c.severity === 'warning' ? '#E8971E' : '#c62828');
+        var textColor = ok ? '#555' : (c.severity === 'warning' ? '#8a5a00' : '#9c2b1a');
+        var mark = ok ? '&#10003;' : (c.severity === 'warning' ? '!' : '&#10007;');
         var countLabel = c.checked === 0 ? 'no data to check' : (passed + ' / ' + c.checked + ' passed');
-        html += '<p style="margin:4px 0;"><span style="color:' + color + '">' + mark + '</span> ' + escHtml(c.label) +
-          ' &mdash; <span style="color:#777">' + countLabel + '</span></p>';
-        if (!ok && c.messages.length) {
-          html += '<ul style="margin:0 0 8px 20px;">' + c.messages.map(function (m) {
-            return '<li style="color:' + failColor + ';font-size:13px;">' + escHtml(m) + '</li>';
-          }).join('') + '</ul>';
-        }
+        var messagesHtml = (!ok && c.messages.length)
+          ? '<div style="margin-top:4px;">' + c.messages.map(function (m) {
+              return '<div style="font-size:12px;color:' + textColor + ';margin-top:2px;">' + escHtml(m) + '</div>';
+            }).join('') + '</div>'
+          : '';
+        html += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:' + rowBg + ';border-radius:8px;margin-bottom:6px;">' +
+          '<tr>' +
+            '<td style="width:30px;vertical-align:top;padding:10px 0 10px 10px;">' +
+              '<div style="width:20px;height:20px;border-radius:50%;background:' + iconBg + ';color:#fff;font-size:11px;font-weight:700;text-align:center;line-height:20px;">' + mark + '</div>' +
+            '</td>' +
+            '<td style="padding:10px 12px 10px 8px;">' +
+              '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' +
+                '<td style="font-size:13px;font-weight:700;color:#222;">' + escHtml(c.label) + '</td>' +
+                '<td style="font-size:11px;font-weight:700;color:#666;background:#fff;padding:2px 8px;border-radius:4px;white-space:nowrap;text-align:right;">' + countLabel + '</td>' +
+              '</tr></table>' +
+              messagesHtml +
+            '</td>' +
+          '</tr>' +
+        '</table>';
       });
-      html += '<hr>';
 
-      html += '<h3>AI commentary</h3>';
-      html += '<p style="color:#777">Not available &mdash; this app has no AI integration configured.</p>';
+      html += '<h3 style="margin:18px 0 6px;">AI commentary</h3>';
+      html += '<div style="color:#777;font-size:13px;">Not available &mdash; this app has no AI integration configured.</div>';
       html += '</div>';
       return { html: html, overallOk: overallOk };
     }
@@ -4278,41 +4321,45 @@
           return '<tr><td>' + escHtml(d.label) + '</td><td>' + statusCell + '</td><td>' + (q ? q.rows : '—') + '</td></tr>';
         }).join('') + '</tbody></table>';
 
-      // One row per criterion: a tick/cross(/warning), the criterion label,
-      // and a "N / M passed" count — with the specific failure messages (if
-      // any) listed underneath so a failing row says exactly what and
-      // where, while a passing row stays a single clean line. A failing
-      // 'warning' criterion gets an amber triangle rather than a red cross,
-      // same distinction Code.js draws between issues and warnings — it's
-      // worth seeing, but it isn't the same kind of problem.
+      // A colored badge strip up top (passed / warnings / errors) so the
+      // overall shape of the checklist reads at a glance, then one card per
+      // criterion — a circular tick/cross/warning icon, the label, and a
+      // "N / M passed" count pill, with a tinted background and the
+      // specific failure messages nested inside for anything failing. A
+      // failing 'warning' criterion gets the amber treatment rather than
+      // red, same distinction Code.js draws between issues and warnings —
+      // worth seeing, but not the same kind of problem.
       function renderCriteriaChecklist(criteria) {
+        var passCount = criteria.filter(function (c) { return c.failed === 0; }).length;
         var errorCount = criteria.filter(function (c) { return c.severity === 'error' && c.failed > 0; }).length;
         var warningCount = criteria.filter(function (c) { return c.severity === 'warning' && c.failed > 0; }).length;
-        var summaryHtml = '<div class="oc-caption" style="margin-bottom:10px;">' +
-          (errorCount || warningCount
-            ? errorCount + ' error' + (errorCount === 1 ? '' : 's') + ', ' + warningCount + ' warning' + (warningCount === 1 ? '' : 's')
-            : 'All checks passed') +
+        var summaryHtml = '<div class="oc-check-summary">' +
+          '<span class="oc-badge up">&#10003; ' + passCount + ' passed</span>' +
+          (errorCount ? '<span class="oc-badge down">&#10007; ' + errorCount + ' error' + (errorCount === 1 ? '' : 's') + '</span>' : '') +
+          (warningCount ? '<span class="oc-badge" style="background:#FFF3DE; color:#8a5a00;">&#9888; ' + warningCount + ' warning' + (warningCount === 1 ? '' : 's') + '</span>' : '') +
         '</div>';
-        return summaryHtml + '<div class="oc-checklist">' + criteria.map(function (c) {
+        return summaryHtml + criteria.map(function (c) {
           var passed = c.checked - c.failed;
           var ok = c.failed === 0;
-          var failColor = c.severity === 'warning' ? 'var(--oc-coral)' : 'var(--oc-negative)';
-          var color = ok ? 'var(--oc-mint-deep)' : failColor;
-          var icon = ok ? '&#10003;' : (c.severity === 'warning' ? '&#9888;' : '&#10007;');
+          var stateClass = ok ? 'pass' : c.severity;
+          var icon = ok ? '&#10003;' : (c.severity === 'warning' ? '!' : '&#10007;');
           var countLabel = c.checked === 0 ? 'no data to check' : (passed + ' / ' + c.checked + ' passed');
           var messagesHtml = (!ok && c.messages.length)
-            ? '<div style="margin:4px 0 2px 24px;">' + c.messages.map(function (m) {
-                return '<div style="color:' + failColor + '; font-size:12px; margin-bottom:3px;">' + escHtml(m) + '</div>';
+            ? '<div class="oc-check-messages">' + c.messages.map(function (m) {
+                return '<div>' + escHtml(m) + '</div>';
               }).join('') + '</div>'
             : '';
-          return '<div style="margin-bottom:8px;">' +
-            '<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">' +
-              '<div style="font-size:13px;"><span style="color:' + color + ';">' + icon + '</span> ' + escHtml(c.label) + '</div>' +
-              '<div class="oc-caption" style="white-space:nowrap;">' + countLabel + '</div>' +
+          return '<div class="oc-check-row' + (ok ? '' : ' ' + c.severity) + '">' +
+            '<div class="oc-check-icon ' + stateClass + '">' + icon + '</div>' +
+            '<div class="oc-check-body">' +
+              '<div class="oc-check-head">' +
+                '<div class="oc-check-label">' + escHtml(c.label) + '</div>' +
+                '<div class="oc-check-count">' + countLabel + '</div>' +
+              '</div>' +
+              messagesHtml +
             '</div>' +
-            messagesHtml +
           '</div>';
-        }).join('') + '</div>';
+        }).join('');
       }
 
       var hs = STATE.health;
