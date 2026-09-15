@@ -594,14 +594,14 @@
     // (see QUERY_HEALTH below), so a query added/removed here automatically
     // shows up there too instead of needing a second list kept in sync.
     var DAX_QUERIES = [
-      { key: 'revenueTarget',  label: 'Revenue vs target',      query: data_revenue_target },
-      { key: 'unifiedFact',    label: 'Project/client fact',    query: data_powerbi_unified_fact },
-      { key: 'hubspotDeals',   label: 'HubSpot deals',          query: data_hubspot_deals },
-      { key: 'utilisation',    label: 'Utilisation',            query: data_utilisation },
-      { key: 'certifications', label: 'Certifications',         query: data_certifications },
-      { key: 'pl',             label: 'P&L (data_pl)',          query: data_pl },
-      { key: 'employeeRoster', label: 'Employee roster',        query: data_employee_roster },
-      { key: 'refProjects',    label: 'Reference projects',     query: data_ref_projects },
+      { key: 'revenueTarget',  label: 'data_revenue_target',        query: data_revenue_target },
+      { key: 'unifiedFact',    label: 'data_powerbi_unified_fact',  query: data_powerbi_unified_fact },
+      { key: 'hubspotDeals',   label: 'data_hubspot_deals',         query: data_hubspot_deals },
+      { key: 'utilisation',    label: 'data_utilisation',           query: data_utilisation },
+      { key: 'certifications', label: 'data_certifications',       query: data_certifications },
+      { key: 'pl',             label: 'data_pl',                    query: data_pl },
+      { key: 'employeeRoster', label: 'data_employee_roster',       query: data_employee_roster },
+      { key: 'refProjects',    label: 'data_ref_projects',          query: data_ref_projects },
     ];
 
     var msalApp = new msal.PublicClientApplication({
