@@ -3885,7 +3885,14 @@
     // the specific detail for each failure — shown only when failed > 0, so
     // a passing criterion just reads "N / N passed" with nothing further to
     // read, and a failing one shows exactly what and where.
-    function newCriterion(label) { return { label: label, checked: 0, failed: 0, messages: [] }; }
+    // severity mirrors Code.js's runDataChecks() issues-vs-warnings split:
+    // 'error' is a real, actionable problem (a number is mathematically out
+    // of bounds, or an entity has no revenue data at all); 'warning' means
+    // something is worth knowing but is expected to happen sometimes (an
+    // OpCo has no P&L/utilisation rows yet, a revenue dip that could be
+    // seasonal). Only 'error' criteria flip the overall OK/ALERT status —
+    // a failing 'warning' still shows up, just without crying wolf.
+    function newCriterion(label, severity) { return { label: label, severity: severity || 'error', checked: 0, failed: 0, messages: [] }; }
 
     // Rules-based data sanity checks, ported from Code.js's runDataChecks() —
     // same 3 underlying checks (revenue MoM drop, GP% bounds, utilisation
@@ -3911,12 +3918,16 @@
       var scopeEnd = periodOf(currentMonthWithData());
       var inScope = function (p) { return !scopeEnd || p <= scopeEnd; };
 
-      var revData = newCriterion('Revenue data available for every operating company');
-      var revTrend = newCriterion('No month-over-month revenue decline exceeding ' + cfg.momDropPct + '%');
-      var plData = newCriterion('P&L data available for every operating company');
-      var gpBounds = newCriterion('Gross margin within expected range (' + cfg.gpMin + '–' + cfg.gpMax + '%)');
-      var utilData = newCriterion('Utilisation data available for every operating company');
-      var utilBounds = newCriterion('Utilisation within expected range (0–' + cfg.utilMax + '%)');
+      // Severities below match Code.js's runDataChecks() exactly: missing
+      // revenue-target rows for an entity is an issue (error) there, while
+      // missing P&L/utilisation rows are warnings — an asymmetry in the
+      // original, not an inconsistency introduced here.
+      var revData = newCriterion('Revenue data available for every operating company', 'error');
+      var revTrend = newCriterion('No month-over-month revenue decline exceeding ' + cfg.momDropPct + '%', 'warning');
+      var plData = newCriterion('P&L data available for every operating company', 'warning');
+      var gpBounds = newCriterion('Gross margin within expected range (' + cfg.gpMin + '–' + cfg.gpMax + '%)', 'error');
+      var utilData = newCriterion('Utilisation data available for every operating company', 'warning');
+      var utilBounds = newCriterion('Utilisation within expected range (0–' + cfg.utilMax + '%)', 'error');
       revData.checked = plData.checked = utilData.checked = entities.length;
 
       // Each check below is isolated in its own try/catch — same reason as
@@ -4036,19 +4047,21 @@
     var FALLBACK_RATE_THRESHOLD = 0.5; // flag once half or more of rows fell back
 
     function runFieldCompletenessChecks() {
-      var c1 = newCriterion('Key fields are populated with valid values');
+      var c1 = newCriterion('Key fields aren\'t defaulting due to a query bug', 'error');
+      var c1b = newCriterion('Optional fields aren\'t unusually sparse', 'warning');
       FIELD_COMPLETENESS_CHECKS.forEach(function (c) {
         var rows = RAW[c.table] || [];
         if (!rows.length) return; // no rows at all is already covered by the Data queries panel
-        c1.checked++;
+        var target = c.likelyBug ? c1 : c1b;
+        target.checked++;
         var fallbackCount = rows.filter(function (r) { return r[c.field] === c.placeholder; }).length;
         var rate = fallbackCount / rows.length;
         if (rate < FALLBACK_RATE_THRESHOLD) return;
-        c1.failed++;
-        c1.messages.push(c.table + '.' + c.field + ': ' + (rate * 100).toFixed(0) + '% of rows (' + fallbackCount + ' of ' + rows.length + ') fell back to "' + c.placeholder + '"' +
+        target.failed++;
+        target.messages.push(c.table + '.' + c.field + ': ' + (rate * 100).toFixed(0) + '% of rows (' + fallbackCount + ' of ' + rows.length + ') fell back to "' + c.placeholder + '"' +
           (c.likelyBug ? ' — likely a query/field-casing mismatch, not missing data (check this column against a live sample row)' : ' — may just be sparse source data, worth a look'));
       });
-      return c1;
+      return [c1, c1b];
     }
 
     // 2) Entity-name consistency across tables — every table here gets
@@ -4068,7 +4081,7 @@
     ];
 
     function runEntityConsistencyChecks() {
-      var c2 = newCriterion('Company names consistent across all data sources');
+      var c2 = newCriterion('Company names consistent across all data sources', 'error');
       var known = {};
       (COMBINED_ENTITIES || []).forEach(function (e) { known[e] = true; });
       if (!Object.keys(known).length) return c2;
@@ -4100,7 +4113,7 @@
     // e.g. project lifecycle status (New/Active/Rolled off) silently
     // reading wrong for the unmatched rows.
     function runProjectJoinCheck() {
-      var c3 = newCriterion('Project codes reconcile with the project reference table');
+      var c3 = newCriterion('Project codes reconcile with the project reference table', 'warning');
       var refCodes = {};
       (RAW.refProjects || []).forEach(function (r) { if (r.Project_Code) refCodes[r.Project_Code] = true; });
       if (!Object.keys(refCodes).length) return c3;
@@ -4118,7 +4131,7 @@
     }
 
     function runAppSpecificChecks() {
-      return [runFieldCompletenessChecks(), runEntityConsistencyChecks(), runProjectJoinCheck()];
+      return runFieldCompletenessChecks().concat([runEntityConsistencyChecks(), runProjectJoinCheck()]);
     }
 
     // Synthetic failing criteria for the Health page's "Simulate" buttons —
@@ -4140,13 +4153,16 @@
       var h = computeHealthSummary();
       var criteria = runDataQualityChecks().concat(runAppSpecificChecks());
       if (scenario) {
-        var testCriterion = newCriterion('TEST MODE — simulated alert (not a real data issue)');
+        var testCriterion = newCriterion('TEST MODE — simulated alert (not a real data issue)', 'error');
         testCriterion.checked = 1;
         testCriterion.failed = 1;
         testCriterion.messages.push(HEALTH_TEST_SCENARIOS[scenario] || HEALTH_TEST_SCENARIOS.missing_data);
         criteria = criteria.concat([testCriterion]);
       }
-      var overallOk = h.status === 'ok' && criteria.every(function (c) { return c.failed === 0; });
+      // Only a failing 'error' criterion flips the overall status — same as
+      // Code.js's sendMonitorEmail, where warnings.length never factors into
+      // overallOk, just dataChecks.issues.length.
+      var overallOk = h.status === 'ok' && criteria.every(function (c) { return c.severity !== 'error' || c.failed === 0; });
 
       var ts = new Date().toLocaleString('en-AU', { timeZone: 'Australia/Sydney' });
       var statusColor = overallOk ? '#2e7d32' : '#c62828';
@@ -4165,17 +4181,23 @@
       html += '<hr>';
 
       html += '<h3>Data quality</h3>';
+      var errorCount = criteria.filter(function (c) { return c.severity === 'error' && c.failed > 0; }).length;
+      var warningCount = criteria.filter(function (c) { return c.severity === 'warning' && c.failed > 0; }).length;
+      html += '<p style="color:#555">' + (errorCount || warningCount
+        ? errorCount + ' error' + (errorCount === 1 ? '' : 's') + ', ' + warningCount + ' warning' + (warningCount === 1 ? '' : 's')
+        : 'All checks passed') + '</p>';
       criteria.forEach(function (c) {
         var passed = c.checked - c.failed;
         var ok = c.failed === 0;
-        var color = ok ? '#2e7d32' : '#c62828';
-        var mark = ok ? '&#10003;' : '&#10007;';
+        var failColor = c.severity === 'warning' ? '#e65100' : '#c62828';
+        var color = ok ? '#2e7d32' : failColor;
+        var mark = ok ? '&#10003;' : (c.severity === 'warning' ? '&#9888;' : '&#10007;');
         var countLabel = c.checked === 0 ? 'no data to check' : (passed + ' / ' + c.checked + ' passed');
         html += '<p style="margin:4px 0;"><span style="color:' + color + '">' + mark + '</span> ' + escHtml(c.label) +
           ' &mdash; <span style="color:#777">' + countLabel + '</span></p>';
         if (!ok && c.messages.length) {
           html += '<ul style="margin:0 0 8px 20px;">' + c.messages.map(function (m) {
-            return '<li style="color:#c62828;font-size:13px;">' + escHtml(m) + '</li>';
+            return '<li style="color:' + failColor + ';font-size:13px;">' + escHtml(m) + '</li>';
           }).join('') + '</ul>';
         }
       });
@@ -4234,20 +4256,31 @@
           return '<tr><td>' + escHtml(d.label) + '</td><td>' + statusCell + '</td><td>' + (q ? q.rows : '—') + '</td></tr>';
         }).join('') + '</tbody></table>';
 
-      // One row per criterion: a tick/cross, the criterion label, and a
-      // "N / M passed" count — with the specific failure messages (if any)
-      // listed underneath so a failing row says exactly what and where,
-      // while a passing row stays a single clean line.
+      // One row per criterion: a tick/cross(/warning), the criterion label,
+      // and a "N / M passed" count — with the specific failure messages (if
+      // any) listed underneath so a failing row says exactly what and
+      // where, while a passing row stays a single clean line. A failing
+      // 'warning' criterion gets an amber triangle rather than a red cross,
+      // same distinction Code.js draws between issues and warnings — it's
+      // worth seeing, but it isn't the same kind of problem.
       function renderCriteriaChecklist(criteria) {
-        return '<div class="oc-checklist">' + criteria.map(function (c) {
+        var errorCount = criteria.filter(function (c) { return c.severity === 'error' && c.failed > 0; }).length;
+        var warningCount = criteria.filter(function (c) { return c.severity === 'warning' && c.failed > 0; }).length;
+        var summaryHtml = '<div class="oc-caption" style="margin-bottom:10px;">' +
+          (errorCount || warningCount
+            ? errorCount + ' error' + (errorCount === 1 ? '' : 's') + ', ' + warningCount + ' warning' + (warningCount === 1 ? '' : 's')
+            : 'All checks passed') +
+        '</div>';
+        return summaryHtml + '<div class="oc-checklist">' + criteria.map(function (c) {
           var passed = c.checked - c.failed;
           var ok = c.failed === 0;
-          var icon = ok ? '&#10003;' : '&#10007;';
-          var color = ok ? 'var(--oc-mint-deep)' : 'var(--oc-negative)';
+          var failColor = c.severity === 'warning' ? 'var(--oc-coral)' : 'var(--oc-negative)';
+          var color = ok ? 'var(--oc-mint-deep)' : failColor;
+          var icon = ok ? '&#10003;' : (c.severity === 'warning' ? '&#9888;' : '&#10007;');
           var countLabel = c.checked === 0 ? 'no data to check' : (passed + ' / ' + c.checked + ' passed');
           var messagesHtml = (!ok && c.messages.length)
             ? '<div style="margin:4px 0 2px 24px;">' + c.messages.map(function (m) {
-                return '<div style="color:var(--oc-negative); font-size:12px; margin-bottom:3px;">' + escHtml(m) + '</div>';
+                return '<div style="color:' + failColor + '; font-size:12px; margin-bottom:3px;">' + escHtml(m) + '</div>';
               }).join('') + '</div>'
             : '';
           return '<div style="margin-bottom:8px;">' +
