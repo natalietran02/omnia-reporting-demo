@@ -3878,8 +3878,24 @@
     // utilisation check reads straight from data_utilisation's raw
     // invoiced/available days (there is no data_key_metrics_monthly query
     // here to cross-check against instead).
+    // A single criterion in a checklist: `checked` is how many individual
+    // things this criterion actually evaluated (an entity, a period, a
+    // field...), `failed` is how many of those failed, and `messages` is
+    // the specific detail for each failure — shown only when failed > 0, so
+    // a passing criterion just reads "N / N passed" with nothing further to
+    // read, and a failing one shows exactly what and where.
+    function newCriterion(label) { return { label: label, checked: 0, failed: 0, messages: [] }; }
+
+    // Rules-based data sanity checks, ported from Code.js's runDataChecks() —
+    // same 3 underlying checks (revenue MoM drop, GP% bounds, utilisation
+    // bounds), but restructured as a checklist (one row per criterion,
+    // "N / M passed") rather than a flat list of only-the-failures, and run
+    // over the entities the live semantic model actually returned
+    // (COMBINED_ENTITIES) rather than a hardcoded OpCo list. The
+    // utilisation check reads straight from data_utilisation's raw
+    // invoiced/available days (there is no data_key_metrics_monthly query
+    // here to cross-check against instead).
     function runDataQualityChecks() {
-      var issues = [], warnings = [];
       var cfg = HEALTH_CHECK_DEFAULTS;
       var entities = COMBINED_ENTITIES.length ? COMBINED_ENTITIES : ENTITIES.filter(function (e) { return e !== COMBINED_ENTITY_LABEL; });
 
@@ -3894,6 +3910,14 @@
       var scopeEnd = periodOf(currentMonthWithData());
       var inScope = function (p) { return !scopeEnd || p <= scopeEnd; };
 
+      var revData = newCriterion('Revenue data available for every OpCo');
+      var revTrend = newCriterion('No revenue drop over ' + cfg.momDropPct + '% month-over-month');
+      var plData = newCriterion('P&L data available for every OpCo');
+      var gpBounds = newCriterion('Gross margin % within ' + cfg.gpMin + '–' + cfg.gpMax + '%');
+      var utilData = newCriterion('Utilisation data available for every OpCo');
+      var utilBounds = newCriterion('Utilisation % within 0–' + cfg.utilMax + '%');
+      revData.checked = plData.checked = utilData.checked = entities.length;
+
       // Each check below is isolated in its own try/catch — same reason as
       // Code.js's per-check try/catch: one section's data being malformed
       // shouldn't take down the other two checks along with it.
@@ -3906,19 +3930,21 @@
             byPeriod[p] = (byPeriod[p] || 0) + (Number(r.total_revenue) || 0);
           });
           var periods = Object.keys(byPeriod).sort().filter(inScope);
-          if (!periods.length) { warnings.push(entity + ': no revenue-vs-target data found'); return; }
+          if (!periods.length) { revData.failed++; revData.messages.push(entity + ': no revenue-vs-target data found'); return; }
           for (var i = 1; i < periods.length; i++) {
             var prev = byPeriod[periods[i - 1]], curr = byPeriod[periods[i]];
             if (prev > 0 && curr > 0) {
+              revTrend.checked++;
               var change = (curr - prev) / prev;
               if (change < -(cfg.momDropPct / 100)) {
-                warnings.push(entity + ': revenue dropped ' + Math.abs(change * 100).toFixed(0) + '% from ' + periods[i - 1] + ' to ' + periods[i]);
+                revTrend.failed++;
+                revTrend.messages.push(entity + ': revenue dropped ' + Math.abs(change * 100).toFixed(0) + '% from ' + periods[i - 1] + ' to ' + periods[i]);
               }
             }
           }
         });
       } catch (e) {
-        issues.push('Failed to check revenue vs target: ' + (e && e.message ? e.message : e));
+        revData.failed++; revData.messages.push('Check failed to run: ' + (e && e.message ? e.message : e));
       }
 
       try {
@@ -3932,18 +3958,20 @@
             gpByPeriod[p].rev += rev;
             gpByPeriod[p].gp += rev + (Number(r.direct_costs_actual) || 0); // direct_costs_actual is negative
           });
-          if (!Object.keys(gpByPeriod).length) { warnings.push('No P&L data found for ' + entity + ' — GP% check skipped'); return; }
+          if (!Object.keys(gpByPeriod).length) { plData.failed++; plData.messages.push('No P&L data found for ' + entity); return; }
           Object.keys(gpByPeriod).filter(inScope).forEach(function (p) {
             var b = gpByPeriod[p];
             if (b.rev <= 0) return;
+            gpBounds.checked++;
             var gpPct = (b.gp / b.rev) * 100;
             if (gpPct < cfg.gpMin || gpPct > cfg.gpMax) {
-              issues.push(entity + ' ' + p + ': GP% is ' + gpPct.toFixed(1) + '% (expected ' + cfg.gpMin + '–' + cfg.gpMax + '%)');
+              gpBounds.failed++;
+              gpBounds.messages.push(entity + ' ' + p + ': GP% is ' + gpPct.toFixed(1) + '% (expected ' + cfg.gpMin + '–' + cfg.gpMax + '%)');
             }
           });
         });
       } catch (e) {
-        warnings.push('Could not check GP% from data_pl: ' + (e && e.message ? e.message : e));
+        plData.failed++; plData.messages.push('Check failed to run: ' + (e && e.message ? e.message : e));
       }
 
       try {
@@ -3956,21 +3984,23 @@
             byPeriodUtil[p].billed += Number(r.invoiced_days) || 0;
             byPeriodUtil[p].max += Number(r.available_days) || 0;
           });
-          if (!Object.keys(byPeriodUtil).length) { warnings.push('No utilisation data found for ' + entity + ' — utilisation check skipped'); return; }
+          if (!Object.keys(byPeriodUtil).length) { utilData.failed++; utilData.messages.push('No utilisation data found for ' + entity); return; }
           Object.keys(byPeriodUtil).filter(inScope).forEach(function (p) {
             var b = byPeriodUtil[p];
             if (b.max <= 0) return;
+            utilBounds.checked++;
             var utilPct = (b.billed / b.max) * 100;
             if (utilPct < 0 || utilPct > cfg.utilMax) {
-              issues.push(entity + ' ' + p + ': utilisation is ' + utilPct.toFixed(1) + '% (expected 0–' + cfg.utilMax + '%)');
+              utilBounds.failed++;
+              utilBounds.messages.push(entity + ' ' + p + ': utilisation is ' + utilPct.toFixed(1) + '% (expected 0–' + cfg.utilMax + '%)');
             }
           });
         });
       } catch (e) {
-        warnings.push('Could not check utilisation from data_utilisation: ' + (e && e.message ? e.message : e));
+        utilData.failed++; utilData.messages.push('Check failed to run: ' + (e && e.message ? e.message : e));
       }
 
-      return { issues: issues, warnings: warnings };
+      return [revData, revTrend, plData, gpBounds, utilData, utilBounds];
     }
 
     // ---- App-specific checks (NOT a Code.js port) ----
@@ -4005,18 +4035,19 @@
     var FALLBACK_RATE_THRESHOLD = 0.5; // flag once half or more of rows fell back
 
     function runFieldCompletenessChecks() {
-      var issues = [], warnings = [];
+      var c1 = newCriterion('Key fields aren\'t silently defaulting');
       FIELD_COMPLETENESS_CHECKS.forEach(function (c) {
         var rows = RAW[c.table] || [];
         if (!rows.length) return; // no rows at all is already covered by the Data queries panel
+        c1.checked++;
         var fallbackCount = rows.filter(function (r) { return r[c.field] === c.placeholder; }).length;
         var rate = fallbackCount / rows.length;
         if (rate < FALLBACK_RATE_THRESHOLD) return;
-        var msg = c.table + '.' + c.field + ': ' + (rate * 100).toFixed(0) + '% of rows (' + fallbackCount + ' of ' + rows.length + ') fell back to "' + c.placeholder + '"' +
-          (c.likelyBug ? ' — likely a query/field-casing mismatch, not missing data (check this column against a live sample row)' : ' — may just be sparse source data, worth a look');
-        if (c.likelyBug) issues.push(msg); else warnings.push(msg);
+        c1.failed++;
+        c1.messages.push(c.table + '.' + c.field + ': ' + (rate * 100).toFixed(0) + '% of rows (' + fallbackCount + ' of ' + rows.length + ') fell back to "' + c.placeholder + '"' +
+          (c.likelyBug ? ' — likely a query/field-casing mismatch, not missing data (check this column against a live sample row)' : ' — may just be sparse source data, worth a look'));
       });
-      return { issues: issues, warnings: warnings };
+      return c1;
     }
 
     // 2) Entity-name consistency across tables — every table here gets
@@ -4036,24 +4067,28 @@
     ];
 
     function runEntityConsistencyChecks() {
-      var issues = [];
+      var c2 = newCriterion('Entity names consistent across every table');
       var known = {};
       (COMBINED_ENTITIES || []).forEach(function (e) { known[e] = true; });
-      if (!Object.keys(known).length) return { issues: issues, warnings: [] };
+      if (!Object.keys(known).length) return c2;
 
       ENTITY_FIELD_BY_TABLE.forEach(function (c) {
         var rows = RAW[c.table] || [];
         if (!rows.length) return;
+        c2.checked++;
         var unknownCounts = {};
         rows.forEach(function (r) {
           var v = r[c.field];
           if (v && !known[v]) unknownCounts[v] = (unknownCounts[v] || 0) + 1;
         });
-        Object.keys(unknownCounts).forEach(function (v) {
-          issues.push(c.table + '.' + c.field + ' has an unrecognized value "' + v + '" (' + unknownCounts[v] + ' rows) — doesn\'t match any known OpCo, so these rows are silently excluded from every page');
+        var unknownValues = Object.keys(unknownCounts);
+        if (!unknownValues.length) return;
+        c2.failed++;
+        unknownValues.forEach(function (v) {
+          c2.messages.push(c.table + '.' + c.field + ' has an unrecognized value "' + v + '" (' + unknownCounts[v] + ' rows) — doesn\'t match any known OpCo, so these rows are silently excluded from every page');
         });
       });
-      return { issues: issues, warnings: [] };
+      return c2;
     }
 
     // 3) Project join-miss rate — % of unifiedFact rows carrying a
@@ -4064,27 +4099,25 @@
     // e.g. project lifecycle status (New/Active/Rolled off) silently
     // reading wrong for the unmatched rows.
     function runProjectJoinCheck() {
-      var warnings = [];
+      var c3 = newCriterion('Project codes join cleanly to data_ref_projects');
       var refCodes = {};
       (RAW.refProjects || []).forEach(function (r) { if (r.Project_Code) refCodes[r.Project_Code] = true; });
-      if (!Object.keys(refCodes).length) return { issues: [], warnings: warnings };
+      if (!Object.keys(refCodes).length) return c3;
 
       var withCode = (RAW.unifiedFact || []).filter(function (r) { return r.project_code; });
-      if (!withCode.length) return { issues: [], warnings: warnings };
+      if (!withCode.length) return c3;
+      c3.checked = 1;
       var unmatched = withCode.filter(function (r) { return !refCodes[r.project_code]; });
       var rate = unmatched.length / withCode.length;
       if (rate >= 0.3) {
-        warnings.push('data_powerbi_unified_fact.project_code: ' + (rate * 100).toFixed(0) + '% of rows (' + unmatched.length + ' of ' + withCode.length + ') have no matching data_ref_projects row — project lifecycle status (New/Active/Rolled off) will be wrong for these');
+        c3.failed = 1;
+        c3.messages.push('data_powerbi_unified_fact.project_code: ' + (rate * 100).toFixed(0) + '% of rows (' + unmatched.length + ' of ' + withCode.length + ') have no matching data_ref_projects row — project lifecycle status (New/Active/Rolled off) will be wrong for these');
       }
-      return { issues: [], warnings: warnings };
+      return c3;
     }
 
     function runAppSpecificChecks() {
-      var results = [runFieldCompletenessChecks(), runEntityConsistencyChecks(), runProjectJoinCheck()];
-      return {
-        issues: results.reduce(function (acc, r) { return acc.concat(r.issues); }, []),
-        warnings: results.reduce(function (acc, r) { return acc.concat(r.warnings); }, []),
-      };
+      return [runFieldCompletenessChecks(), runEntityConsistencyChecks(), runProjectJoinCheck()];
     }
 
     function renderHealthPage() {
@@ -4110,22 +4143,41 @@
           return '<tr><td>' + escHtml(d.label) + '</td><td>' + statusCell + '</td><td>' + (q ? q.rows : '—') + '</td></tr>';
         }).join('') + '</tbody></table>';
 
-      function renderChecksHtml(c) {
-        return (c.issues.length === 0 && c.warnings.length === 0)
-          ? '<div class="oc-caption">No issues found.</div>'
-          : c.issues.map(function (i) { return '<div style="color:var(--oc-negative); font-size:13px; margin-bottom:6px;">&#10007; ' + escHtml(i) + '</div>'; }).join('') +
-            c.warnings.map(function (w) { return '<div style="color:var(--oc-coral); font-size:13px; margin-bottom:6px;">&#9888; ' + escHtml(w) + '</div>'; }).join('');
+      // One row per criterion: a tick/cross, the criterion label, and a
+      // "N / M passed" count — with the specific failure messages (if any)
+      // listed underneath so a failing row says exactly what and where,
+      // while a passing row stays a single clean line.
+      function renderCriteriaChecklist(criteria) {
+        return '<div class="oc-checklist">' + criteria.map(function (c) {
+          var passed = c.checked - c.failed;
+          var ok = c.failed === 0;
+          var icon = ok ? '&#10003;' : '&#10007;';
+          var color = ok ? 'var(--oc-mint-deep)' : 'var(--oc-negative)';
+          var countLabel = c.checked === 0 ? 'no data to check' : (passed + ' / ' + c.checked + ' passed');
+          var messagesHtml = (!ok && c.messages.length)
+            ? '<div style="margin:4px 0 2px 24px;">' + c.messages.map(function (m) {
+                return '<div style="color:var(--oc-negative); font-size:12px; margin-bottom:3px;">' + escHtml(m) + '</div>';
+              }).join('') + '</div>'
+            : '';
+          return '<div style="margin-bottom:8px;">' +
+            '<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">' +
+              '<div style="font-size:13px;"><span style="color:' + color + ';">' + icon + '</span> ' + escHtml(c.label) + '</div>' +
+              '<div class="oc-caption" style="white-space:nowrap;">' + countLabel + '</div>' +
+            '</div>' +
+            messagesHtml +
+          '</div>';
+        }).join('') + '</div>';
       }
 
       return kpiHtml +
         '<section class="oc-panel"><h3 class="oc-panel-title">Data queries</h3>' + tabsHtml + '</section>' +
         '<section class="oc-panel"><h3 class="oc-panel-title">Data quality</h3>' +
           '<div class="oc-panel-sub">Ported from Apps Script\'s runDataChecks() — does the business data look sane (margin/utilisation in range, revenue not cratering).</div>' +
-          renderChecksHtml(checks) +
+          renderCriteriaChecklist(checks) +
         '</section>' +
         '<section class="oc-panel"><h3 class="oc-panel-title">App-specific checks</h3>' +
           '<div class="oc-panel-sub">Not from Apps Script — targets failure modes unique to querying a semantic model client-side: silent DAX casing mismatches and broken cross-table joins.</div>' +
-          renderChecksHtml(appChecks) +
+          renderCriteriaChecklist(appChecks) +
         '</section>';
     }
 
