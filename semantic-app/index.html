@@ -441,7 +441,10 @@
     // saving the row and sending the notification email — one token request,
     // one consent prompt. Requested as an array since MSAL happily bundles
     // multiple delegated scopes for the same resource (Graph) into one call.
-    var FEEDBACK_GRAPH_SCOPES = ["https://graph.microsoft.com/Files.ReadWrite", "https://graph.microsoft.com/Mail.Send"];
+    // User.Read added alongside Files.ReadWrite/Mail.Send so this same token
+    // also works for the Pending fix PRs backend's admin check, which calls
+    // Graph's /me to verify the caller before touching GitHub.
+    var FEEDBACK_GRAPH_SCOPES = ["https://graph.microsoft.com/Files.ReadWrite", "https://graph.microsoft.com/Mail.Send", "https://graph.microsoft.com/User.Read"];
     var FEEDBACK_SHEET_NAME = "Feedback";
     var FEEDBACK_TABLE_NAME = "FeedbackTable";
     var FEEDBACK_NOTIFY_EMAIL = "natalie@edgered.com.au";
