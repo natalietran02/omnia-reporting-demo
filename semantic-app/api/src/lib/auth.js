@@ -1,21 +1,5 @@
 const { HttpError } = require("./httpError");
 
-// Diagnostic-only — never used to make an auth decision (Graph itself is
-// still the one and only source of truth for whether the token is valid).
-// Just decodes the JWT payload so a failure message can show which
-// audience/issuer/scopes the token actually carries.
-function decodeJwtPayloadForDiagnostics(token) {
-  try {
-    const parts = token.split(".");
-    if (parts.length < 2) return null;
-    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
-    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
-  } catch (e) {
-    return null;
-  }
-}
-
 // Kept identical to semantic-app/index.html's own constants — this is a
 // server-side mirror of checkAccess(), not a separate source of truth.
 // If the AccessUsers workbook ever moves, update both places.
@@ -25,36 +9,33 @@ const FEEDBACK_ITEM_ID = "01MFUWM2QFPLMV4GOQBNCZP5ZXH6WOPKVV";
 const ACCESS_TABLE_NAME = "AccessUsersTable";
 const WORKBOOK_BASE = "https://graph.microsoft.com/v1.0/drives/" + FEEDBACK_DRIVE_ID + "/items/" + FEEDBACK_ITEM_ID;
 
+// The caller's Graph token travels in a custom header, NOT Authorization —
+// confirmed via a live diagnostic that Azure Static Web Apps' proxy
+// overwrites the standard Authorization header with its own internal
+// SWA-to-Function service token before this function ever sees the
+// request, so a client-supplied bearer token in that header never survives
+// the trip. Deliberately NOT prefixed "x-ms-" either — that prefix is
+// Azure's own reserved namespace (x-ms-client-principal and friends), so a
+// header spelled that way risks the exact same silent-overwrite problem.
+const GRAPH_TOKEN_HEADER = "x-omnia-graph-token";
+
 // Verifies the caller is a signed-in admin before any fix-PR function does
-// anything. The bearer token is the same Microsoft Graph token the frontend
-// already holds for the feedback/access-list workbook (Files.ReadWrite
-// scope) — passed straight through in the Authorization header rather than
-// re-issued here.
+// anything. The token is the same Microsoft Graph token the frontend
+// already holds for the feedback/access-list workbook (Files.ReadWrite +
+// User.Read scopes) — passed straight through rather than re-issued here.
 //
 // We never validate the JWT signature ourselves: Microsoft Graph does that
 // the instant we use the token to call /me, so a forged, expired, or
 // wrong-audience token simply fails that call with a 401 instead of needing
 // our own signature/JWKS check.
 async function requireAdmin(request) {
-  const authHeader = request.headers.get("authorization") || "";
-  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-  if (!token) throw new HttpError(401, "Missing Authorization header");
+  const token = (request.headers.get(GRAPH_TOKEN_HEADER) || "").trim();
+  if (!token) throw new HttpError(401, "Missing " + GRAPH_TOKEN_HEADER + " header");
 
   const meResp = await fetch("https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName", {
     headers: { Authorization: "Bearer " + token },
   });
-  if (!meResp.ok) {
-    // Temporary: surface Graph's actual error plus the token's own claims
-    // instead of a generic message, while we track down why /me is being
-    // rejected — "Signing key is invalid" usually means wrong audience/
-    // tenant, not a missing scope, so this should show which.
-    const bodyText = await meResp.text().catch(() => "");
-    const claims = decodeJwtPayloadForDiagnostics(token);
-    const claimsSummary = claims
-      ? "aud=" + claims.aud + " iss=" + claims.iss + " tid=" + claims.tid + " scp=" + (claims.scp || "")
-      : "(could not decode token)";
-    throw new HttpError(401, "Graph /me failed (" + meResp.status + "): " + bodyText.slice(0, 200) + " | " + claimsSummary);
-  }
+  if (!meResp.ok) throw new HttpError(401, "Invalid or expired sign-in token");
   const me = await meResp.json();
   const email = String(me.mail || me.userPrincipalName || "").toLowerCase();
   if (!email) throw new HttpError(401, "Could not determine caller identity");

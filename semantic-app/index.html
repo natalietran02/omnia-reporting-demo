@@ -4332,9 +4332,14 @@
     }
 
     // Talks to the Azure Functions backend in semantic-app/api — passes the
-    // same Graph token used elsewhere on this page (Files.ReadWrite scope)
-    // since that's what requireAdmin() on the server checks against Graph's
-    // own /me endpoint and the AccessUsersTable, mirroring checkAccess().
+    // same Graph token used elsewhere on this page (Files.ReadWrite +
+    // User.Read scopes) since that's what requireAdmin() on the server
+    // checks against Graph's own /me endpoint and the AccessUsersTable,
+    // mirroring checkAccess(). Sent in a custom header, not Authorization —
+    // Azure Static Web Apps' proxy overwrites that header with its own
+    // internal SWA-to-Function service token before the request reaches the
+    // function, confirmed via a live diagnostic (the function was seeing a
+    // token with an azurewebsites.net audience, never the one sent here).
     async function loadFixPrs() {
       var hs = STATE.fixPrs;
       hs.loading = true;
@@ -4342,7 +4347,7 @@
       renderPage();
       try {
         var token = await getFeedbackGraphToken();
-        var resp = await fetch('/api/fix-prs', { headers: { Authorization: 'Bearer ' + token } });
+        var resp = await fetch('/api/fix-prs', { headers: { 'x-omnia-graph-token': token } });
         var data = await resp.json().catch(function () { return {}; });
         if (!resp.ok) throw new Error(data.error || ('Request failed (' + resp.status + ')'));
         hs.list = data;
@@ -4362,7 +4367,7 @@
         var token = await getFeedbackGraphToken();
         var resp = await fetch('/api/fix-prs/' + prNumber + '/' + action, {
           method: 'POST',
-          headers: { Authorization: 'Bearer ' + token },
+          headers: { 'x-omnia-graph-token': token },
         });
         var data = await resp.json().catch(function () { return {}; });
         if (!resp.ok) throw new Error(data.error || ('Request failed (' + resp.status + ')'));
