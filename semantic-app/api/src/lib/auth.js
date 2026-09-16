@@ -27,7 +27,12 @@ async function requireAdmin(request) {
   const meResp = await fetch("https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName", {
     headers: { Authorization: "Bearer " + token },
   });
-  if (!meResp.ok) throw new HttpError(401, "Invalid or expired sign-in token");
+  if (!meResp.ok) {
+    // Temporary: surface Graph's actual error instead of a generic message
+    // while we track down why /me is being rejected.
+    const bodyText = await meResp.text().catch(() => "");
+    throw new HttpError(401, "Graph /me failed (" + meResp.status + "): " + bodyText.slice(0, 300));
+  }
   const me = await meResp.json();
   const email = String(me.mail || me.userPrincipalName || "").toLowerCase();
   if (!email) throw new HttpError(401, "Could not determine caller identity");
