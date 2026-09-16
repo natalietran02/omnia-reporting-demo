@@ -1108,6 +1108,7 @@
       isAccessAdmin: false,
       modal: { kind: null },
       health: { testEmail: '', testEmailSending: false, testEmailStatus: null },
+      fixPrs: { list: null, loading: false, error: null, actionInFlight: {} },
     };
 
     var NAV_ITEMS = [
@@ -4327,6 +4328,83 @@
       return { ok: built.overallOk, sentTo: email };
     }
 
+    // Talks to the Azure Functions backend in semantic-app/api — passes the
+    // same Graph token used elsewhere on this page (Files.ReadWrite scope)
+    // since that's what requireAdmin() on the server checks against Graph's
+    // own /me endpoint and the AccessUsersTable, mirroring checkAccess().
+    async function loadFixPrs() {
+      var hs = STATE.fixPrs;
+      hs.loading = true;
+      hs.error = null;
+      renderPage();
+      try {
+        var token = await getFeedbackGraphToken();
+        var resp = await fetch('/api/fix-prs', { headers: { Authorization: 'Bearer ' + token } });
+        var data = await resp.json().catch(function () { return {}; });
+        if (!resp.ok) throw new Error(data.error || ('Request failed (' + resp.status + ')'));
+        hs.list = data;
+      } catch (e) {
+        hs.error = e && e.message ? e.message : String(e);
+      }
+      hs.loading = false;
+      renderPage();
+    }
+
+    async function actOnFixPr(prNumber, action) {
+      var hs = STATE.fixPrs;
+      hs.actionInFlight[prNumber] = true;
+      hs.error = null;
+      renderPage();
+      try {
+        var token = await getFeedbackGraphToken();
+        var resp = await fetch('/api/fix-prs/' + prNumber + '/' + action, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + token },
+        });
+        var data = await resp.json().catch(function () { return {}; });
+        if (!resp.ok) throw new Error(data.error || ('Request failed (' + resp.status + ')'));
+        delete hs.actionInFlight[prNumber];
+        await loadFixPrs(); // re-fetches the list — the acted-on PR should no longer be open
+      } catch (e) {
+        delete hs.actionInFlight[prNumber];
+        hs.error = e && e.message ? e.message : String(e);
+        renderPage();
+      }
+    }
+
+    function renderFixPrsPanel() {
+      var hs = STATE.fixPrs;
+      var bodyHtml;
+      if (hs.loading && !hs.list) {
+        bodyHtml = '<div class="oc-caption">Loading…</div>';
+      } else if (hs.error) {
+        bodyHtml = '<div class="oc-caption" style="color:var(--oc-negative);">' + escHtml(hs.error) + '</div>';
+      } else if (!hs.list || !hs.list.length) {
+        bodyHtml = '<div class="oc-caption">No pending fix PRs.</div>';
+      } else {
+        bodyHtml = '<table class="oc-table"><thead><tr><th>Title</th><th>Branch</th><th>Created</th><th></th></tr></thead><tbody>' +
+          hs.list.map(function (pr) {
+            var busy = !!hs.actionInFlight[pr.pr_number];
+            return '<tr>' +
+              '<td><a href="' + escAttr(pr.pr_url) + '" target="_blank" rel="noopener">' + escHtml(pr.title) + '</a></td>' +
+              '<td>' + escHtml(pr.branch) + '</td>' +
+              '<td>' + escHtml(new Date(pr.created).toLocaleDateString()) + '</td>' +
+              '<td style="display:flex; gap:6px;">' +
+                '<button class="oc-btn oc-btn-primary" data-approve-pr="' + pr.pr_number + '"' + (busy ? ' disabled' : '') + '>Approve</button>' +
+                '<button class="oc-btn oc-btn-danger" data-reject-pr="' + pr.pr_number + '"' + (busy ? ' disabled' : '') + '>Reject</button>' +
+              '</td>' +
+            '</tr>';
+          }).join('') + '</tbody></table>';
+      }
+
+      return '<section class="oc-panel"><div class="oc-panel-head"><h3 class="oc-panel-title">Pending fix PRs</h3>' +
+          '<button class="oc-btn oc-btn-ghost" id="fixprs-refresh-btn"' + (hs.loading ? ' disabled' : '') + '>' + (hs.loading ? 'Loading…' : 'Refresh') + '</button>' +
+        '</div>' +
+        '<div class="oc-panel-sub">Open pull requests on fix/* branches in this repo — Approve squash-merges to main, Reject closes without merging.</div>' +
+        bodyHtml +
+      '</section>';
+    }
+
     function renderHealthPage() {
       if (!STATE.isAccessAdmin) return renderNotReadyPanel('Health', 'Admin access required.');
       var h = computeHealthSummary();
@@ -4414,6 +4492,7 @@
         '<section class="oc-panel" style="opacity:0.6;" title="No AI integration in this app — nothing to report"><h3 class="oc-panel-title">AI commentary</h3>' +
           '<div class="oc-caption">Not configured — this app has no AI integration to generate anomaly commentary from.</div>' +
         '</section>' +
+        renderFixPrsPanel() +
         adminActionsHtml;
     }
 
@@ -4449,6 +4528,20 @@
       el.querySelectorAll('[data-alert-scenario]').forEach(function (btn) {
         btn.addEventListener('click', function () { runTestAction(btn.getAttribute('data-alert-scenario')); });
       });
+
+      var fp = STATE.fixPrs;
+      var refreshBtn = el.querySelector('#fixprs-refresh-btn');
+      if (refreshBtn) refreshBtn.addEventListener('click', function () { loadFixPrs(); });
+      el.querySelectorAll('[data-approve-pr]').forEach(function (btn) {
+        btn.addEventListener('click', function () { actOnFixPr(Number(btn.getAttribute('data-approve-pr')), 'approve'); });
+      });
+      el.querySelectorAll('[data-reject-pr]').forEach(function (btn) {
+        btn.addEventListener('click', function () { actOnFixPr(Number(btn.getAttribute('data-reject-pr')), 'reject'); });
+      });
+      // Loads once automatically on first visit to the page — guarded so
+      // the re-render loadFixPrs() itself triggers (via renderPage()) can't
+      // cause this to fire again and again.
+      if (fp.list === null && !fp.loading && !fp.error) loadFixPrs();
     }
 
     // ---- Page dispatch (Phase 2 will replace each remaining placeholder
