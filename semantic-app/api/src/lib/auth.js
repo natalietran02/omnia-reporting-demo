@@ -1,5 +1,21 @@
 const { HttpError } = require("./httpError");
 
+// Diagnostic-only — never used to make an auth decision (Graph itself is
+// still the one and only source of truth for whether the token is valid).
+// Just decodes the JWT payload so a failure message can show which
+// audience/issuer/scopes the token actually carries.
+function decodeJwtPayloadForDiagnostics(token) {
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+  } catch (e) {
+    return null;
+  }
+}
+
 // Kept identical to semantic-app/index.html's own constants — this is a
 // server-side mirror of checkAccess(), not a separate source of truth.
 // If the AccessUsers workbook ever moves, update both places.
@@ -28,10 +44,16 @@ async function requireAdmin(request) {
     headers: { Authorization: "Bearer " + token },
   });
   if (!meResp.ok) {
-    // Temporary: surface Graph's actual error instead of a generic message
-    // while we track down why /me is being rejected.
+    // Temporary: surface Graph's actual error plus the token's own claims
+    // instead of a generic message, while we track down why /me is being
+    // rejected — "Signing key is invalid" usually means wrong audience/
+    // tenant, not a missing scope, so this should show which.
     const bodyText = await meResp.text().catch(() => "");
-    throw new HttpError(401, "Graph /me failed (" + meResp.status + "): " + bodyText.slice(0, 300));
+    const claims = decodeJwtPayloadForDiagnostics(token);
+    const claimsSummary = claims
+      ? "aud=" + claims.aud + " iss=" + claims.iss + " tid=" + claims.tid + " scp=" + (claims.scp || "")
+      : "(could not decode token)";
+    throw new HttpError(401, "Graph /me failed (" + meResp.status + "): " + bodyText.slice(0, 200) + " | " + claimsSummary);
   }
   const me = await meResp.json();
   const email = String(me.mail || me.userPrincipalName || "").toLowerCase();
