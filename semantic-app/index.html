@@ -4825,9 +4825,16 @@
         var scopeNoteHtml = (cr.result.scope && !cr.result.scope.matched && cr.result.scope.note)
           ? '<div class="oc-caption" style="margin-top:8px;">No specific function matched that description — reviewed the whole file with a focus on: ' + escHtml(cr.result.scope.note) + '</div>'
           : '';
+        // Whole-file reviews (full review, or a targeted review that fell
+        // back to the whole file) skip the second Claude verification pass
+        // to stay under Azure's proxy timeout — see codeReview.js. Static
+        // checks (quote/location grounding) still ran either way.
+        var verifySkippedHtml = (cr.result.verification && cr.result.verification.llmVerificationSkipped)
+          ? '<div class="oc-caption" style="margin-top:4px;">Findings below passed static checks (quoted code confirmed real) but skipped the second AI verification pass, which only runs on a scoped/targeted review — kept fast for a file this size.</div>'
+          : '';
         resultHtml = '<div style="margin-top:14px;">' +
           '<div class="oc-caption">Reviewed ' + escHtml((cr.result.filesReviewed || []).join(', ')) + ' · ' + new Date(cr.result.reviewedAt).toLocaleString() + '</div>' +
-          scopeNoteHtml +
+          scopeNoteHtml + verifySkippedHtml +
           (findings.length === 0
             ? '<div class="oc-caption" style="margin-top:10px;">No findings.</div>'
             : '<div style="margin-top:10px;">' + findings.map(function (f, i) {
@@ -4844,7 +4851,7 @@
       }
 
       return '<section class="oc-panel"><h3 class="oc-panel-title">AI code review</h3>' +
-        '<div class="oc-panel-sub">Reviews semantic-app/index.html with Claude, statically and re-verifies each finding against the real source before showing it, and can open a fix PR straight into the Pending fix PRs panel below.</div>' +
+        '<div class="oc-panel-sub">Reviews semantic-app/index.html with Claude, checks every finding\'s quoted code is real before showing it (a Targeted review of a specific area also gets a second AI verification pass), and can open a fix PR straight into the Pending fix PRs panel below.</div>' +
         modeToggleHtml + actionHtml + resultHtml +
       '</section>';
     }

@@ -295,10 +295,29 @@ async function verifyFindingsWithLLM(findings, source) {
   });
 }
 
-// Runs both verification layers and returns only the survivors, plus a
-// report of what was rejected and why.
-async function verifyAndFilterFindings(findings, source) {
+// Runs verification and returns only the survivors, plus a report of what
+// was rejected and why. The layer-1 static checks (free, no API call)
+// always run. Layer 2 (the batched LLM re-verify call) is skipped when
+// `useLlm` is false — a whole-file review already spends one full Claude
+// call on ~5,000+ lines of source; a second full-file call to verify pushes
+// total request time past Azure Static Web Apps' managed-API proxy timeout
+// (confirmed live: a full review + verify chain returned the proxy's own
+// "Backend call failure" after ~45s, not an application error). Scoped
+// reviews (a handful of functions, not the whole file) stay fast enough for
+// both layers, so they keep the stronger guarantee.
+async function verifyAndFilterFindings(findings, source, useLlm) {
   const staticResult = staticVerifyFindings(findings, source);
+  if (!useLlm) {
+    return {
+      findings: staticResult.kept,
+      report: {
+        generated: findings.length,
+        staticRejected: staticResult.dropped.map((d) => ({ title: d.finding.title, reasons: d.reasons })),
+        llmRefuted: [],
+        llmVerificationSkipped: true,
+      },
+    };
+  }
   const verified = await verifyFindingsWithLLM(staticResult.kept, source);
   const refuted = verified.filter((f) => f.verify && f.verify.verdict === "REFUTED");
   const final = verified.filter((f) => !f.verify || f.verify.verdict !== "REFUTED");
@@ -324,16 +343,20 @@ function checklistFor(functionNames) {
   );
 }
 
-async function runReviewPrompt(promptBody) {
+async function runReviewPrompt(promptBody, effort) {
   const response = await anthropicParse({
-    max_tokens: 16000,
-    output_config: { effort: "high", format: zodOutputFormat(FindingsOutputSchema) },
+    max_tokens: 8000,
+    output_config: { effort: effort || "high", format: zodOutputFormat(FindingsOutputSchema) },
     messages: [{ role: "user", content: promptBody }],
   });
   return response.parsed_output.findings;
 }
 
-// Full review of the whole reviewed file.
+// Full review of the whole reviewed file. Runs at "medium" effort and skips
+// the second-pass LLM verification (see verifyAndFilterFindings) — the file
+// is ~5,000+ lines, and a whole-file review is already one large call;
+// adding a second one risks exceeding Azure Static Web Apps' proxy timeout
+// for the request. Static verification (free, no extra call) still runs.
 async function runCodeReview() {
   const { content: source } = await fetchFileContent(REVIEW_TARGET_FILE);
   const { blocks } = buildFunctionIndex(source);
@@ -348,8 +371,8 @@ async function runCodeReview() {
     "The file (" + REVIEW_TARGET_FILE + "):\n=== " + REVIEW_TARGET_FILE + " ===\n" +
     source;
 
-  const findings = await runReviewPrompt(prompt);
-  const verifyResult = await verifyAndFilterFindings(findings, source);
+  const findings = await runReviewPrompt(prompt, "medium");
+  const verifyResult = await verifyAndFilterFindings(findings, source, false);
 
   return {
     findings: verifyResult.findings,
@@ -444,8 +467,12 @@ async function runTargetedCodeReview(description) {
     "\n\n" +
     content;
 
-  const findings = await runReviewPrompt(prompt);
-  const verifyResult = await verifyAndFilterFindings(findings, source);
+  // Only a genuinely scoped review (a handful of matched functions, not the
+  // whole file) can afford the second-pass LLM verification within Azure's
+  // proxy timeout — the no-match fallback sends the full file, same as
+  // runCodeReview, so it gets the same fast/static-only treatment.
+  const findings = await runReviewPrompt(prompt, matched ? "high" : "medium");
+  const verifyResult = await verifyAndFilterFindings(findings, source, matched);
 
   return {
     findings: verifyResult.findings,
