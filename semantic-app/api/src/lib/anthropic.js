@@ -129,28 +129,4 @@ async function anthropicCreate(params) {
   return response;
 }
 
-// Structured-JSON generation via `output_config.format` (Zod schema) —
-// used for code review findings, function-selection, verification verdicts,
-// and code-fix patches. Replaces Code.js's fragile "extract JSON out of
-// prose" (extractJsonSpan/sanitizeClaudeJson) with the API validating the
-// shape itself; `response.parsed_output` is null if parsing genuinely failed.
-async function anthropicParse(params) {
-  assertBudgetOk();
-  const c = getClient();
-  let response;
-  try {
-    response = await c.messages.parse({ model: CLAUDE_MODEL, ...params });
-  } catch (err) {
-    throw mapAnthropicError(err);
-  }
-  recordSpend(callCostUsd(response.usage, CLAUDE_MODEL));
-  if (response.stop_reason === "max_tokens") {
-    throw new HttpError(502, "Claude's response was cut off by the token limit before finishing — try again with a narrower request.");
-  }
-  if (response.parsed_output == null) {
-    throw new HttpError(502, "Anthropic response did not match the expected JSON shape");
-  }
-  return response;
-}
-
-module.exports = { CLAUDE_MODEL, anthropicCreate, anthropicParse, budgetStatus };
+module.exports = { CLAUDE_MODEL, anthropicCreate, budgetStatus };

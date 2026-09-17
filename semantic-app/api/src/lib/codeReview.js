@@ -1,46 +1,177 @@
 const { z } = require("zod");
-const { zodOutputFormat } = require("@anthropic-ai/sdk/helpers/zod");
-const { anthropicParse } = require("./anthropic");
+const { anthropicCreate } = require("./anthropic");
 const { REVIEW_TARGET_FILE, fetchFileContent } = require("./github");
 const { HttpError } = require("./httpError");
 
 // Ported from Code.js's runCodeReview()/runTargetedCodeReview() + its
-// two-layer verification pass, adapted to this app's shape: one reviewed
-// file (semantic-app/index.html — a single SPA, not Code.js+Index.html),
-// and structured outputs (Zod schemas below) instead of the old "extract
-// JSON out of prose" (extractJsonSpan/sanitizeClaudeJson) workaround —
-// the API now validates the shape itself.
+// two-layer verification pass, adapted to this app's single reviewed file
+// (semantic-app/index.html, not Code.js+Index.html).
+//
+// Uses the SAME plain-text-generation + manual-JSON-extraction approach
+// Code.js used (extractJsonSpan/sanitizeClaudeJson below, ported verbatim),
+// NOT Anthropic's newer structured-output API (`output_config.format` /
+// `messages.parse()`) — an earlier version of this file used that instead,
+// and every route built on it failed live in production (Azure's proxy
+// returned a generic "Backend call failure") while the one route NOT using
+// it (AI commentary, plain `anthropicCreate`) worked. Rather than keep
+// debugging an unverified API combination, this reverts to the exact
+// pattern already proven working in this app. Zod schemas below now only
+// validate the parsed JSON locally (a safety net), not to enforce the
+// API's response shape.
+
+// ---------- JSON-from-prose helpers (ported verbatim from Code.js) ----------
+
+// Finds the JSON array/object in Claude's response text, even when Claude
+// prefaces it with a sentence or two despite being told to return ONLY
+// JSON. Tracks bracket depth — skipping brackets inside "..." strings so
+// they don't throw off the count — and returns the largest complete
+// balanced span, since the real JSON payload is always far bigger than an
+// incidental bracket in a sentence. Returns null if no balanced span exists.
+function extractJsonSpan(text, openChar, closeChar) {
+  let best = null;
+  let inString = false;
+  let escaped = false;
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) { escaped = false; }
+      else if (ch === "\\") { escaped = true; }
+      else if (ch === '"') { inString = false; }
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === openChar) {
+      if (depth === 0) start = i;
+      depth++;
+      continue;
+    }
+    if (ch === closeChar && depth > 0) {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        const span = text.slice(start, i + 1);
+        if (!best || span.length > best.length) best = span;
+        start = -1;
+      }
+    }
+  }
+  return best;
+}
+
+// Claude's JSON output sometimes isn't valid JSON as-is: bare backslashes in
+// string values, literal newline/tab/CR characters instead of escapes, and
+// unescaped literal " characters (especially in "quote" fields that
+// reproduce source code verbatim) that prematurely end the JSON string.
+// Walks the text tracking whether it's inside a "..." string and fixes all
+// three only there.
+function sanitizeClaudeJson(raw) {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (!inString) {
+      if (ch === '"') inString = true;
+      out += ch;
+      continue;
+    }
+    if (escaped) {
+      escaped = false;
+      if (ch === "u") {
+        const hex = raw.substr(i + 1, 4);
+        out += /^[0-9a-fA-F]{4}$/.test(hex) ? "\\u" : "\\\\u";
+      } else if ('"\\/bfnrt'.indexOf(ch) !== -1) {
+        out += "\\" + ch;
+      } else {
+        out += "\\\\" + ch; // invalid escape sequence — escape the backslash itself
+      }
+      continue;
+    }
+    if (ch === "\\") { escaped = true; continue; }
+    if (ch === '"') {
+      // A real string terminator is followed by a JSON structural character
+      // (or end of input) once trailing whitespace is skipped — anything
+      // else means this quote is literal content Claude failed to escape.
+      let j = i + 1;
+      while (j < raw.length && /\s/.test(raw[j])) j++;
+      const next = raw[j];
+      if (next === undefined || ",}]:".indexOf(next) !== -1) {
+        inString = false;
+        out += ch;
+      } else {
+        out += '\\"';
+      }
+      continue;
+    }
+    if (ch === "\n") { out += "\\n"; continue; }
+    if (ch === "\r") { out += "\\r"; continue; }
+    if (ch === "\t") { out += "\\t"; continue; }
+    out += ch;
+  }
+  return out;
+}
+
+// Sends a prompt, extracts the JSON array/object from the plain-text
+// response, sanitizes it, and validates it against a local Zod schema
+// (a safety net over the parsed result — not an API-enforced shape).
+async function askForJson(prompt, schema, bracket, effort, maxTokens) {
+  const openChar = bracket === "array" ? "[" : "{";
+  const closeChar = bracket === "array" ? "]" : "}";
+  const response = await anthropicCreate({
+    max_tokens: maxTokens,
+    output_config: { effort: effort || "high" },
+    messages: [{ role: "user", content: prompt }],
+  });
+  if (response.stop_reason === "max_tokens") {
+    throw new HttpError(502, "Claude's response was cut off by the token limit before finishing — try a narrower description.");
+  }
+  const textBlock = response.content.find((b) => b.type === "text");
+  const text = textBlock ? textBlock.text : "";
+  const match = extractJsonSpan(text, openChar, closeChar);
+  if (!match) throw new HttpError(502, "Could not find a JSON " + bracket + " in Claude's response");
+  let parsed;
+  try {
+    parsed = JSON.parse(sanitizeClaudeJson(match));
+  } catch (e) {
+    throw new HttpError(502, "Claude returned malformed JSON: " + (e && e.message));
+  }
+  const result = schema.safeParse(parsed);
+  if (!result.success) {
+    throw new HttpError(502, "Claude's JSON didn't match the expected shape: " + result.error.issues.map((iss) => iss.message).join("; "));
+  }
+  return result.data;
+}
+
+// ---------- Schemas (local validation only — see header comment) ----------
 
 const FindingSchema = z.object({
   severity: z.enum(["critical", "high", "medium", "low"]),
-  file: z.literal(REVIEW_TARGET_FILE),
-  location: z.string().describe("function name the finding is about"),
-  title: z.string().describe("short title, max 60 chars"),
-  description: z.string().describe("what is wrong and why it matters"),
-  quote: z.string().describe("the exact code (verbatim, character for character, 1-6 lines) this finding is about"),
-  suggestion: z.string().describe("how to fix it in plain English — no code snippets"),
+  location: z.string(),
+  title: z.string(),
+  description: z.string(),
+  quote: z.string(),
+  suggestion: z.string(),
 });
-const FindingsOutputSchema = z.object({ findings: z.array(FindingSchema).max(15) });
+const FindingsSchema = z.array(FindingSchema).max(15);
 
-const SelectionOutputSchema = z.object({
-  matched: z.array(z.string()).describe("exact function names from the given list — empty if none are relevant"),
-  note: z.string().describe("why these were picked, or what theme to focus on if none matched"),
-});
-
-const VerdictsOutputSchema = z.object({
-  verdicts: z.array(
-    z.object({
-      index: z.number(),
-      verdict: z.enum(["CONFIRMED", "REFUTED"]),
-      reason: z.string(),
-    })
-  ),
+const SelectionSchema = z.object({
+  matched: z.array(z.string()),
+  note: z.string(),
 });
 
-const PatchOutputSchema = z.object({
-  old_string: z.string().describe("exact text to replace — include 3-8 surrounding lines so it is unique in the file"),
-  new_string: z.string().describe("the replacement text"),
-  explanation: z.string().describe("one sentence explaining the change"),
+const VerdictsSchema = z.array(
+  z.object({
+    index: z.number(),
+    verdict: z.enum(["CONFIRMED", "REFUTED"]),
+    reason: z.string(),
+  })
+);
+
+const PatchSchema = z.object({
+  old_string: z.string(),
+  new_string: z.string(),
+  explanation: z.string(),
 });
 
 const REVIEW_FOCUS =
@@ -59,6 +190,14 @@ const REVIEW_FOCUS =
   "restatement — do not just judge whether the code \"looks reasonable\" on its own.\n\n" +
   "Only report a finding if you can back it with an exact quote from the code below — never describe code from " +
   "memory or assumption.";
+
+const FINDINGS_JSON_INSTRUCTIONS =
+  "Return ONLY a JSON array (no other text, no markdown fences) with up to 15 real findings. " +
+  "Only report a finding if you can back it with an exact quote from the code below:\n" +
+  "[\n  {\n    \"severity\": \"critical|high|medium|low\",\n    \"location\": \"function name\",\n" +
+  "    \"title\": \"short title (max 60 chars)\",\n    \"description\": \"what is wrong and why it matters\",\n" +
+  "    \"quote\": \"the exact code (verbatim, character for character, 1-6 lines) this finding is about\",\n" +
+  "    \"suggestion\": \"how to fix it in plain English — no code snippets or regex patterns\"\n  }\n]\n\n";
 
 // ---------- Function-block indexing (pure string ops, no GAS dependency) ----------
 
@@ -270,22 +409,19 @@ async function verifyFindingsWithLLM(findings, source) {
     "cannot see both locations to compare, REFUTE as unverifiable rather than trusting the description.\n" +
     "5. Default to REFUTED whenever you are not certain — an unverified finding reaching the user is worse " +
     "than a real one being dropped, since real bugs get caught again on the next review pass.\n\n" +
-    items;
+    items + "\n\n" +
+    'Return ONLY a JSON array (no other text, no markdown fences), exactly one entry per finding, same order:\n' +
+    '[\n  {\n    "index": 0,\n    "verdict": "CONFIRMED|REFUTED",\n    "reason": "one sentence"\n  }\n]';
 
-  let response;
+  let verdicts;
   try {
-    response = await anthropicParse({
-      max_tokens: 4096,
-      output_config: { effort: "high", format: zodOutputFormat(VerdictsOutputSchema) },
-      messages: [{ role: "user", content: prompt }],
-    });
+    verdicts = await askForJson(prompt, VerdictsSchema, "array", "high", 2048);
   } catch (e) {
     // If the verify call itself fails, don't silently drop everything —
     // pass findings through unverified rather than blocking the whole review.
-    return findings.map((f) => ({ ...f, verify: { verdict: "UNVERIFIED", reason: "verification call threw: " + (e && e.message) } }));
+    return findings.map((f) => ({ ...f, verify: { verdict: "UNVERIFIED", reason: "verification call failed: " + (e && e.message) } }));
   }
 
-  const verdicts = response.parsed_output.verdicts;
   return findings.map((f, i) => {
     const v = verdicts.find((x) => x.index === i);
     return {
@@ -297,27 +433,11 @@ async function verifyFindingsWithLLM(findings, source) {
 
 // Runs verification and returns only the survivors, plus a report of what
 // was rejected and why. The layer-1 static checks (free, no API call)
-// always run. Layer 2 (the batched LLM re-verify call) is skipped when
-// `useLlm` is false — a whole-file review already spends one full Claude
-// call on ~5,000+ lines of source; a second full-file call to verify pushes
-// total request time past Azure Static Web Apps' managed-API proxy timeout
-// (confirmed live: a full review + verify chain returned the proxy's own
-// "Backend call failure" after ~45s, not an application error). Scoped
-// reviews (a handful of functions, not the whole file) stay fast enough for
-// both layers, so they keep the stronger guarantee.
-async function verifyAndFilterFindings(findings, source, useLlm) {
+// always run; layer 2 (the batched LLM re-verify call) only runs for scoped
+// reviews (see runTargetedCodeReview) — small enough to comfortably fit
+// within Azure Static Web Apps' managed-API proxy timeout.
+async function verifyAndFilterFindings(findings, source) {
   const staticResult = staticVerifyFindings(findings, source);
-  if (!useLlm) {
-    return {
-      findings: staticResult.kept,
-      report: {
-        generated: findings.length,
-        staticRejected: staticResult.dropped.map((d) => ({ title: d.finding.title, reasons: d.reasons })),
-        llmRefuted: [],
-        llmVerificationSkipped: true,
-      },
-    };
-  }
   const verified = await verifyFindingsWithLLM(staticResult.kept, source);
   const refuted = verified.filter((f) => f.verify && f.verify.verdict === "REFUTED");
   const final = verified.filter((f) => !f.verify || f.verify.verdict !== "REFUTED");
@@ -343,13 +463,13 @@ function checklistFor(functionNames) {
   );
 }
 
+// Runs the review prompt and stamps every finding with the fixed target
+// file — the model is never asked for a "file" field at all, since there's
+// only ever one possible value here and asking for it is one more thing
+// that could come back malformed.
 async function runReviewPrompt(promptBody, effort) {
-  const response = await anthropicParse({
-    max_tokens: 8000,
-    output_config: { effort: effort || "high", format: zodOutputFormat(FindingsOutputSchema) },
-    messages: [{ role: "user", content: promptBody }],
-  });
-  return response.parsed_output.findings;
+  const findings = await askForJson(promptBody, FindingsSchema, "array", effort, 8000);
+  return findings.map((f) => ({ ...f, file: REVIEW_TARGET_FILE }));
 }
 
 // Asks Claude to pick which function(s) — out of the whole-file index — are
@@ -366,15 +486,14 @@ async function selectRelevantFunctionsViaLLM(indexEntries, description) {
     "Pick ONLY the function(s) from the list above that are actually relevant to that description — do not " +
     'invent function names that are not in the list. If nothing in the list is genuinely relevant, return an ' +
     'empty "matched" array and use "note" to briefly explain what\'s missing or suggest a more specific way to ' +
-    "describe the area, since no match means nothing gets reviewed this time.";
+    "describe the area, since no match means nothing gets reviewed this time.\n\n" +
+    "Return ONLY a JSON object (no other text, no markdown fences):\n" +
+    '{\n  "matched": ["exact function name from the list", ...],\n' +
+    '  "note": "why these were picked, or what theme to focus on if none matched"\n}';
 
-  let response;
+  let parsed;
   try {
-    response = await anthropicParse({
-      max_tokens: 700,
-      output_config: { effort: "medium", format: zodOutputFormat(SelectionOutputSchema) },
-      messages: [{ role: "user", content: prompt }],
-    });
+    parsed = await askForJson(prompt, SelectionSchema, "object", "medium", 700);
   } catch (e) {
     return { matched: [], note: "" };
   }
@@ -382,19 +501,18 @@ async function selectRelevantFunctionsViaLLM(indexEntries, description) {
   // Defensive: only trust matches that actually exist in the index sent —
   // never let a hallucinated function name silently scope the review.
   const validNames = new Set(indexEntries.map((e) => e.name));
-  const matched = response.parsed_output.matched.filter((n) => validNames.has(n));
-  return { matched, note: response.parsed_output.note || "" };
+  const matched = parsed.matched.filter((n) => validNames.has(n));
+  return { matched, note: parsed.note || "" };
 }
 
 // Scoped to the function(s) judged relevant to a user-supplied description.
 // Deliberately does NOT fall back to reviewing the whole file when nothing
 // matches — a full-file review is one large Claude call over ~5,000+ lines,
 // which was confirmed live to exceed Azure Static Web Apps' managed-API
-// proxy timeout regardless of effort tuning (it returned the proxy's own
-// "Backend call failure" rather than an application error). Rather than
-// occasionally hitting that same failure whenever a description doesn't
-// match a real function, a no-match here just returns no findings with a
-// note explaining why, so the caller can rephrase.
+// proxy timeout (it returned the proxy's own "Backend call failure" rather
+// than an application error). Rather than occasionally hitting that same
+// failure whenever a description doesn't match a real function, a no-match
+// here just returns no findings with a note explaining why.
 async function runTargetedCodeReview(description) {
   description = String(description || "").trim();
   if (!description) throw new HttpError(400, "description is required");
@@ -444,13 +562,14 @@ async function runTargetedCodeReview(description) {
     checklistFor(selection.matched) +
     REVIEW_FOCUS +
     "\n\n" +
+    FINDINGS_JSON_INSTRUCTIONS +
     content;
 
   // Scoped to a handful of functions (never the whole file, see above), so
   // this can afford both the higher-effort review and the full two-pass
   // LLM verification within Azure's proxy timeout.
   const findings = await runReviewPrompt(prompt, "high");
-  const verifyResult = await verifyAndFilterFindings(findings, source, true);
+  const verifyResult = await verifyAndFilterFindings(findings, source);
 
   return {
     findings: verifyResult.findings,
@@ -492,15 +611,16 @@ async function generateCodeFix(finding) {
     "- Description: " + finding.description + "\n" +
     "- Fix: " + finding.suggestion + "\n\n" +
     "File (" + REVIEW_TARGET_FILE + "):\n```\n" + fileContent + "\n```\n\n" +
+    "Return ONLY a JSON object (no other text, no markdown fences):\n" +
+    "{\n" +
+    '  "old_string": "exact text to replace — include 3-8 surrounding lines so it is unique in the file",\n' +
+    '  "new_string": "the replacement text",\n' +
+    '  "explanation": "one sentence explaining the change"\n' +
+    "}\n\n" +
     "The old_string must be an exact substring of the file above — character for character.";
 
-  const response = await anthropicParse({
-    max_tokens: 2048,
-    output_config: { effort: "high", format: zodOutputFormat(PatchOutputSchema) },
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  return { patch: response.parsed_output, file: REVIEW_TARGET_FILE };
+  const patch = await askForJson(prompt, PatchSchema, "object", "high", 2048);
+  return { patch, file: REVIEW_TARGET_FILE };
 }
 
 module.exports = { runTargetedCodeReview, generateCodeFix };
