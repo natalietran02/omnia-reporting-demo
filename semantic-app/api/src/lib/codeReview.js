@@ -352,36 +352,6 @@ async function runReviewPrompt(promptBody, effort) {
   return response.parsed_output.findings;
 }
 
-// Full review of the whole reviewed file. Runs at "medium" effort and skips
-// the second-pass LLM verification (see verifyAndFilterFindings) — the file
-// is ~5,000+ lines, and a whole-file review is already one large call;
-// adding a second one risks exceeding Azure Static Web Apps' proxy timeout
-// for the request. Static verification (free, no extra call) still runs.
-async function runCodeReview() {
-  const { content: source } = await fetchFileContent(REVIEW_TARGET_FILE);
-  const { blocks } = buildFunctionIndex(source);
-  const functionNames = blocks.map((b) => b.name);
-
-  const prompt =
-    "You are a senior JavaScript engineer reviewing the Omnia Reporting web app (a single-page dashboard, " +
-    "backed by a Power BI semantic model and a small Azure Functions API).\n\n" +
-    REVIEW_FOCUS +
-    "\n\n" +
-    checklistFor(functionNames) +
-    "The file (" + REVIEW_TARGET_FILE + "):\n=== " + REVIEW_TARGET_FILE + " ===\n" +
-    source;
-
-  const findings = await runReviewPrompt(prompt, "medium");
-  const verifyResult = await verifyAndFilterFindings(findings, source, false);
-
-  return {
-    findings: verifyResult.findings,
-    reviewedAt: new Date().toISOString(),
-    filesReviewed: [REVIEW_TARGET_FILE],
-    verification: verifyResult.report,
-  };
-}
-
 // Asks Claude to pick which function(s) — out of the whole-file index — are
 // actually relevant to a free-text problem description, instead of naive
 // keyword matching.
@@ -395,8 +365,8 @@ async function selectRelevantFunctionsViaLLM(indexEntries, description) {
     '\n\nA user described this problem/area to review:\n"' + description + '"\n\n' +
     "Pick ONLY the function(s) from the list above that are actually relevant to that description — do not " +
     'invent function names that are not in the list. If nothing in the list is genuinely relevant, return an ' +
-    'empty "matched" array and use "note" to briefly say what topic/theme the description seems to be about, ' +
-    "so a full-file review can at least focus on that theme.";
+    'empty "matched" array and use "note" to briefly explain what\'s missing or suggest a more specific way to ' +
+    "describe the area, since no match means nothing gets reviewed this time.";
 
   let response;
   try {
@@ -416,9 +386,15 @@ async function selectRelevantFunctionsViaLLM(indexEntries, description) {
   return { matched, note: response.parsed_output.note || "" };
 }
 
-// Like runCodeReview, but scoped to the function(s) judged relevant to a
-// user-supplied description. Falls back to a full-file review if nothing in
-// the index was judged relevant.
+// Scoped to the function(s) judged relevant to a user-supplied description.
+// Deliberately does NOT fall back to reviewing the whole file when nothing
+// matches — a full-file review is one large Claude call over ~5,000+ lines,
+// which was confirmed live to exceed Azure Static Web Apps' managed-API
+// proxy timeout regardless of effort tuning (it returned the proxy's own
+// "Backend call failure" rather than an application error). Rather than
+// occasionally hitting that same failure whenever a description doesn't
+// match a real function, a no-match here just returns no findings with a
+// note explaining why, so the caller can rephrase.
 async function runTargetedCodeReview(description) {
   description = String(description || "").trim();
   if (!description) throw new HttpError(400, "description is required");
@@ -430,55 +406,57 @@ async function runTargetedCodeReview(description) {
   try {
     selection = await selectRelevantFunctionsViaLLM(index, description);
   } catch (e) {
-    // Selection step failing shouldn't block the review — fall back to full-file.
+    // Selection step failing is treated the same as a genuine no-match below.
   }
   const matched = selection.matched.length > 0;
 
-  let content, functionNames;
-  if (matched) {
-    const sections = selection.matched
-      .map((name) => {
-        const b = blocks.find((x) => x.name === name);
-        if (!b) return null;
-        const start = Math.max(0, b.start - 3);
-        const end = Math.min(lines.length - 1, b.end);
-        return "// lines " + (start + 1) + "-" + (end + 1) + "\n" + lines.slice(start, end + 1).join("\n");
-      })
-      .filter(Boolean);
-    content = "=== " + REVIEW_TARGET_FILE + " (relevant sections only) ===\n" + sections.join("\n\n// ...\n\n");
-    functionNames = selection.matched;
-  } else {
-    content = "=== " + REVIEW_TARGET_FILE + " ===\n" + source;
-    functionNames = blocks.map((b) => b.name);
+  if (!matched) {
+    return {
+      findings: [],
+      reviewedAt: new Date().toISOString(),
+      filesReviewed: [],
+      scope: {
+        description,
+        matched: false,
+        note: selection.note || "No function in semantic-app/index.html matched that description — try naming a specific function, UI element, or behavior.",
+      },
+      verification: { generated: 0, staticRejected: [], llmRefuted: [] },
+    };
   }
 
-  const scopeGuidance = matched
-    ? "Below are the section(s) of the codebase judged most relevant to that description. Only review this scoped code — do not invent issues about code you cannot see.\n\n" + checklistFor(functionNames)
-    : "No specific function in this codebase was judged relevant to that description, so the full file is included below instead. " +
-      (selection.note ? 'A first pass suggested this theme to focus on: "' + selection.note + '". ' : "") +
-      "Prioritise findings related to that theme/description where the code actually supports it — do not invent anything about code that is not actually present below.\n\n";
+  const sections = selection.matched
+    .map((name) => {
+      const b = blocks.find((x) => x.name === name);
+      if (!b) return null;
+      const start = Math.max(0, b.start - 3);
+      const end = Math.min(lines.length - 1, b.end);
+      return "// lines " + (start + 1) + "-" + (end + 1) + "\n" + lines.slice(start, end + 1).join("\n");
+    })
+    .filter(Boolean);
+  const content = "=== " + REVIEW_TARGET_FILE + " (relevant sections only) ===\n" + sections.join("\n\n// ...\n\n");
 
   const prompt =
     "You are a senior JavaScript engineer reviewing the Omnia Reporting web app (a single-page dashboard, " +
     "backed by a Power BI semantic model and a small Azure Functions API).\n\n" +
     'The user has described a specific problem area to focus on:\n"' + description + '"\n\n' +
-    scopeGuidance +
+    "Below are the section(s) of the codebase judged most relevant to that description. Only review this scoped " +
+    "code — do not invent issues about code you cannot see.\n\n" +
+    checklistFor(selection.matched) +
     REVIEW_FOCUS +
     "\n\n" +
     content;
 
-  // Only a genuinely scoped review (a handful of matched functions, not the
-  // whole file) can afford the second-pass LLM verification within Azure's
-  // proxy timeout — the no-match fallback sends the full file, same as
-  // runCodeReview, so it gets the same fast/static-only treatment.
-  const findings = await runReviewPrompt(prompt, matched ? "high" : "medium");
-  const verifyResult = await verifyAndFilterFindings(findings, source, matched);
+  // Scoped to a handful of functions (never the whole file, see above), so
+  // this can afford both the higher-effort review and the full two-pass
+  // LLM verification within Azure's proxy timeout.
+  const findings = await runReviewPrompt(prompt, "high");
+  const verifyResult = await verifyAndFilterFindings(findings, source, true);
 
   return {
     findings: verifyResult.findings,
     reviewedAt: new Date().toISOString(),
-    filesReviewed: matched ? selection.matched.map((n) => REVIEW_TARGET_FILE + ":" + n) : [REVIEW_TARGET_FILE],
-    scope: { description, matched, note: selection.note || "" },
+    filesReviewed: selection.matched.map((n) => REVIEW_TARGET_FILE + ":" + n),
+    scope: { description, matched: true, note: selection.note || "" },
     verification: verifyResult.report,
   };
 }
@@ -525,4 +503,4 @@ async function generateCodeFix(finding) {
   return { patch: response.parsed_output, file: REVIEW_TARGET_FILE };
 }
 
-module.exports = { runCodeReview, runTargetedCodeReview, generateCodeFix };
+module.exports = { runTargetedCodeReview, generateCodeFix };

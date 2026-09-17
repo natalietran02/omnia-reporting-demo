@@ -1148,7 +1148,6 @@
         aiBudget: null, aiBudgetLoading: false, aiBudgetError: null,
       },
       fixPrs: { list: null, loading: false, error: null, actionInFlight: {} },
-      codeReviewMode: 'full',
       codeReview: { targetedDesc: '', running: false, error: null, result: null },
     };
 
@@ -4495,25 +4494,16 @@
       renderPage();
     }
 
-    // ---- AI code review (ported from Code.js's runCodeReview()/
-    // runTargetedCodeReview()) — the review itself, verification, and fix
-    // generation all run server-side (semantic-app/api/src/lib/codeReview.js);
-    // this is just the run/display/wire layer. ----
-    async function runFullCodeReview() {
-      var cr = STATE.codeReview;
-      cr.running = true;
-      cr.error = null;
-      cr.result = null;
-      renderPage();
-      try {
-        cr.result = await callAdminApi('/api/code-review', { method: 'POST' });
-      } catch (e) {
-        cr.error = e && e.message ? e.message : String(e);
-      }
-      cr.running = false;
-      renderPage();
-    }
-
+    // ---- AI code review (ported from Code.js's runTargetedCodeReview(),
+    // scoped to a described area) — the review itself, verification, and
+    // fix generation all run server-side
+    // (semantic-app/api/src/lib/codeReview.js); this is just the
+    // run/display/wire layer. No whole-file "Full review" option: a
+    // full-file review is one large Claude call over this file's ~5,000+
+    // lines, confirmed live to exceed Azure Static Web Apps' managed-API
+    // proxy timeout (it returns the proxy's own generic "Backend call
+    // failure", not an application error) regardless of effort tuning —
+    // so only the always-scoped targeted review is offered. ----
     async function runTargetedCodeReviewNow() {
       var cr = STATE.codeReview;
       if (!cr.targetedDesc.trim()) return;
@@ -4801,58 +4791,43 @@
     }
 
     // ---- AI code review panel ----
+    // Always scoped by description — there is no whole-file "Full review"
+    // (see the comment on runTargetedCodeReviewNow above for why).
     function renderCodeReviewPanel() {
       var cr = STATE.codeReview;
-      var mode = STATE.codeReviewMode || 'full';
 
-      var modeToggleHtml = renderPillToggle([{ key: 'full', label: 'Full review' }, { key: 'targeted', label: 'Targeted' }], 'codeReviewMode');
-
-      var actionHtml;
-      if (mode === 'targeted') {
-        actionHtml =
-          '<label class="oc-field-label" style="margin-top:12px;">Describe the area to review</label>' +
-          '<textarea class="oc-feedback-textarea" id="cr-targeted-desc" placeholder="e.g. the period picker\'s comparison-basis logic" style="min-height:70px;">' + escHtml(cr.targetedDesc) + '</textarea>' +
-          '<button class="oc-btn oc-btn-primary" id="cr-run-targeted-btn" style="margin-top:8px;"' + (cr.running ? ' disabled' : '') + '>' + (cr.running ? 'Reviewing…' : 'Review this area') + '</button>';
-      } else {
-        actionHtml = '<button class="oc-btn oc-btn-primary" id="cr-run-full-btn" style="margin-top:12px;"' + (cr.running ? ' disabled' : '') + '>' + (cr.running ? 'Reviewing…' : 'Run full review') + '</button>';
-      }
+      var actionHtml =
+        '<label class="oc-field-label" style="margin-top:12px;">Describe the area to review</label>' +
+        '<textarea class="oc-feedback-textarea" id="cr-targeted-desc" placeholder="e.g. the period picker\'s comparison-basis logic" style="min-height:70px;">' + escHtml(cr.targetedDesc) + '</textarea>' +
+        '<button class="oc-btn oc-btn-primary" id="cr-run-targeted-btn" style="margin-top:8px;"' + (cr.running ? ' disabled' : '') + '>' + (cr.running ? 'Reviewing…' : 'Review this area') + '</button>';
 
       var resultHtml = '';
       if (cr.error) {
         resultHtml = '<div class="oc-ask-status oc-ask-error" style="margin-top:12px;">' + escHtml(cr.error) + '</div>';
       } else if (cr.result) {
         var findings = cr.result.findings || [];
-        var scopeNoteHtml = (cr.result.scope && !cr.result.scope.matched && cr.result.scope.note)
-          ? '<div class="oc-caption" style="margin-top:8px;">No specific function matched that description — reviewed the whole file with a focus on: ' + escHtml(cr.result.scope.note) + '</div>'
-          : '';
-        // Whole-file reviews (full review, or a targeted review that fell
-        // back to the whole file) skip the second Claude verification pass
-        // to stay under Azure's proxy timeout — see codeReview.js. Static
-        // checks (quote/location grounding) still ran either way.
-        var verifySkippedHtml = (cr.result.verification && cr.result.verification.llmVerificationSkipped)
-          ? '<div class="oc-caption" style="margin-top:4px;">Findings below passed static checks (quoted code confirmed real) but skipped the second AI verification pass, which only runs on a scoped/targeted review — kept fast for a file this size.</div>'
-          : '';
         resultHtml = '<div style="margin-top:14px;">' +
-          '<div class="oc-caption">Reviewed ' + escHtml((cr.result.filesReviewed || []).join(', ')) + ' · ' + new Date(cr.result.reviewedAt).toLocaleString() + '</div>' +
-          scopeNoteHtml + verifySkippedHtml +
-          (findings.length === 0
-            ? '<div class="oc-caption" style="margin-top:10px;">No findings.</div>'
-            : '<div style="margin-top:10px;">' + findings.map(function (f, i) {
-                return '<div class="oc-finding-row">' +
-                  '<span class="oc-sev-chip ' + f.severity + '">' + escHtml(f.severity) + '</span>' +
-                  '<span style="font-weight:700;">' + escHtml(f.title) + '</span>' +
-                  '<div class="oc-caption">' + escHtml(f.location) + '</div>' +
-                  '<div style="font-size:13px; color:var(--fg2); margin:6px 0;">' + escHtml(f.description) + '</div>' +
-                  '<div style="font-size:12px; color:var(--oc-mid-teal); font-style:italic;">' + escHtml(f.suggestion) + '</div>' +
-                  '<button class="oc-btn oc-btn-ghost" style="margin-top:8px;" data-fix-idx="' + i + '">Generate fix</button>' +
-                '</div>';
-              }).join('') + '</div>') +
+          (cr.result.scope && !cr.result.scope.matched
+            ? '<div class="oc-caption">' + escHtml(cr.result.scope.note) + '</div>'
+            : '<div class="oc-caption">Reviewed ' + escHtml((cr.result.filesReviewed || []).join(', ')) + ' · ' + new Date(cr.result.reviewedAt).toLocaleString() + '</div>' +
+              (findings.length === 0
+                ? '<div class="oc-caption" style="margin-top:10px;">No findings.</div>'
+                : '<div style="margin-top:10px;">' + findings.map(function (f, i) {
+                    return '<div class="oc-finding-row">' +
+                      '<span class="oc-sev-chip ' + f.severity + '">' + escHtml(f.severity) + '</span>' +
+                      '<span style="font-weight:700;">' + escHtml(f.title) + '</span>' +
+                      '<div class="oc-caption">' + escHtml(f.location) + '</div>' +
+                      '<div style="font-size:13px; color:var(--fg2); margin:6px 0;">' + escHtml(f.description) + '</div>' +
+                      '<div style="font-size:12px; color:var(--oc-mid-teal); font-style:italic;">' + escHtml(f.suggestion) + '</div>' +
+                      '<button class="oc-btn oc-btn-ghost" style="margin-top:8px;" data-fix-idx="' + i + '">Generate fix</button>' +
+                    '</div>';
+                  }).join('') + '</div>')) +
         '</div>';
       }
 
       return '<section class="oc-panel"><h3 class="oc-panel-title">AI code review</h3>' +
-        '<div class="oc-panel-sub">Reviews semantic-app/index.html with Claude, checks every finding\'s quoted code is real before showing it (a Targeted review of a specific area also gets a second AI verification pass), and can open a fix PR straight into the Pending fix PRs panel below.</div>' +
-        modeToggleHtml + actionHtml + resultHtml +
+        '<div class="oc-panel-sub">Describe an area of semantic-app/index.html and Claude will review just that code, verify each finding\'s quoted code is real before showing it, and can open a fix PR straight into the Pending fix PRs panel below.</div>' +
+        actionHtml + resultHtml +
       '</section>';
     }
 
@@ -4909,13 +4884,9 @@
       var commentaryBtn = el.querySelector('#health-commentary-btn');
       if (commentaryBtn) commentaryBtn.addEventListener('click', loadAiCommentary);
 
-      // AI code review — mode toggle itself is wired generically by
-      // wirePillToggles(el) in renderPage() (STATE.codeReviewMode is a flat
-      // top-level key, same convention as every other pill toggle).
+      // AI code review
       var targetedDescEl = el.querySelector('#cr-targeted-desc');
       if (targetedDescEl) targetedDescEl.addEventListener('input', function () { STATE.codeReview.targetedDesc = targetedDescEl.value; });
-      var runFullBtn = el.querySelector('#cr-run-full-btn');
-      if (runFullBtn) runFullBtn.addEventListener('click', runFullCodeReview);
       var runTargetedBtn = el.querySelector('#cr-run-targeted-btn');
       if (runTargetedBtn) runTargetedBtn.addEventListener('click', runTargetedCodeReviewNow);
       el.querySelectorAll('[data-fix-idx]').forEach(function (btn) {
