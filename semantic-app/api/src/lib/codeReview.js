@@ -498,9 +498,13 @@ async function runTargetedCodeReview(description) {
     content;
 
   // One Claude call total for this request (see selectRelevantFunctionsLocally
-  // and verifyAndFilterFindings above for why) — scoped to a handful of
-  // functions, never the whole file, so it can afford high effort.
-  const findings = await runReviewPrompt(prompt, "high");
+  // and verifyAndFilterFindings above for why). Effort is "medium", not
+  // "high" — effort controls how long Claude spends thinking, which is
+  // independent of how much code is in the prompt, so a small scoped
+  // snippet at "high" effort can still run long enough to hit Azure's proxy
+  // timeout. A scoped review of a handful of functions doesn't need "high"'s
+  // extra depth to catch real bugs.
+  const findings = await runReviewPrompt(prompt, "medium");
   const verifyResult = verifyAndFilterFindings(findings, source);
 
   return {
