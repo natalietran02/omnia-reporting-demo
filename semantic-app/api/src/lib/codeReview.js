@@ -155,19 +155,6 @@ const FindingSchema = z.object({
 });
 const FindingsSchema = z.array(FindingSchema).max(15);
 
-const SelectionSchema = z.object({
-  matched: z.array(z.string()),
-  note: z.string(),
-});
-
-const VerdictsSchema = z.array(
-  z.object({
-    index: z.number(),
-    verdict: z.enum(["CONFIRMED", "REFUTED"]),
-    reason: z.string(),
-  })
-);
-
 const PatchSchema = z.object({
   old_string: z.string(),
   new_string: z.string(),
@@ -337,116 +324,23 @@ function staticVerifyFindings(findings, source) {
 // Grabs just the function body a finding's "location" points to (plus a
 // couple lines of leading context) so the batched verify call doesn't need
 // to resend the whole file per finding.
-function snippetForLocation(source, location, fallback) {
-  const found = findFunctionBlocks(source);
-  const block = found.blocks.find((b) => b.name === location);
-  if (!block) return fallback || "";
-  const start = Math.max(0, block.start - 2);
-  const end = Math.min(found.lines.length - 1, block.end);
-  return found.lines.slice(start, end + 1).join("\n");
-}
-
-// Pulls up to maxLines other lines in the file that mention the same
-// identifier(s) as the finding's location/quote, outside the primary
-// snippet — lets the verifier see a design-intent comment or a second call
-// site living elsewhere in the file, cheaply (plain regex, no extra API cost).
-function relatedMentions(source, location, quote, primarySnippet, maxLines) {
-  maxLines = maxLines || 12;
-  const tokens = new Set();
-  (String(location || "").match(/[A-Za-z_$][A-Za-z0-9_$]{2,}/g) || []).forEach((t) => tokens.add(t));
-  (String(quote || "").match(/[A-Za-z_$][A-Za-z0-9_$]{2,}/g) || []).forEach((t) => tokens.add(t));
-  const names = Array.from(tokens).filter((t) => !/^(function|const|let|var|return|null|undefined|true|false|this)$/.test(t));
-  if (!names.length) return "";
-
-  const lines = source.split("\n");
-  const res = [];
-  for (let i = 0; i < lines.length && res.length < maxLines; i++) {
-    const line = lines[i];
-    if (primarySnippet.indexOf(line) !== -1) continue;
-    if (names.some((n) => line.indexOf(n) !== -1)) res.push(i + 1 + ": " + line.trim());
-  }
-  return res.join("\n");
-}
-
-// Layer 2 verification: one batched call covering every layer-1 survivor,
-// each judged against its own snippet plus nearby related lines — added
-// after a review call confirmed findings a design-intent comment or a
-// second call site would have disproved, because it never saw those lines.
-async function verifyFindingsWithLLM(findings, source) {
-  if (!findings.length) return [];
-
-  const items = findings
-    .map((f, i) => {
-      const snippet = snippetForLocation(source, f.location, f.quote);
-      const related = relatedMentions(source, f.location, f.quote, snippet);
-      return (
-        "--- Finding #" + i + " ---\n" +
-        "Location: " + f.location + "\nTitle: " + f.title + "\n" +
-        "Description: " + f.description + "\n" +
-        "Code:\n```\n" + snippet + "\n```\n" +
-        (related ? "Other lines elsewhere in the file mentioning the same identifiers (may confirm, explain, or contradict the finding):\n```\n" + related + "\n```\n" : "")
-      );
-    })
-    .join("\n");
-
-  const prompt =
-    "You are a skeptical senior engineer double-checking a colleague's code review findings before they " +
-    "reach a human, specifically to catch cases where the reviewer misremembered or fabricated code structure, " +
-    "or invented a failure scenario that sounds plausible but cannot actually happen.\n\n" +
-    'For each finding, judge it against the code snippet AND the "other lines elsewhere" block for that finding, ' +
-    "if one is given. Rules:\n" +
-    "1. Do not accept the finding's own description of what the code does — re-derive it yourself from the " +
-    "snippet. If the finding depends on arithmetic, an index/loop bound, or a formula, recompute it by hand " +
-    "line by line with concrete example values before deciding; if your own recomputation contradicts the " +
-    "finding's claimed result, REFUTE and state what you actually got.\n" +
-    '2. If the finding claims a failure scenario ("if X happens, then Y breaks"), REFUTE unless the snippet ' +
-    "shows X is actually reachable given the real logic — an unverified hypothetical is not a bug.\n" +
-    "3. If the finding claims two names/fields/locations are duplicated, orphaned, or inconsistent, check the " +
-    '"other lines elsewhere" block first for a comment or second usage that explains them as intentionally ' +
-    "distinct — if one exists, REFUTE.\n" +
-    "4. If the finding claims something about ORDER (one line/call happening before or after another), quote " +
-    "the exact two lines in your reason and confirm their relative order as they literally appear — if you " +
-    "cannot see both locations to compare, REFUTE as unverifiable rather than trusting the description.\n" +
-    "5. Default to REFUTED whenever you are not certain — an unverified finding reaching the user is worse " +
-    "than a real one being dropped, since real bugs get caught again on the next review pass.\n\n" +
-    items + "\n\n" +
-    'Return ONLY a JSON array (no other text, no markdown fences), exactly one entry per finding, same order:\n' +
-    '[\n  {\n    "index": 0,\n    "verdict": "CONFIRMED|REFUTED",\n    "reason": "one sentence"\n  }\n]';
-
-  let verdicts;
-  try {
-    verdicts = await askForJson(prompt, VerdictsSchema, "array", "high", 2048);
-  } catch (e) {
-    // If the verify call itself fails, don't silently drop everything —
-    // pass findings through unverified rather than blocking the whole review.
-    return findings.map((f) => ({ ...f, verify: { verdict: "UNVERIFIED", reason: "verification call failed: " + (e && e.message) } }));
-  }
-
-  return findings.map((f, i) => {
-    const v = verdicts.find((x) => x.index === i);
-    return {
-      ...f,
-      verify: v ? { verdict: v.verdict, reason: v.reason } : { verdict: "UNVERIFIED", reason: "verification call returned no verdict for this finding" },
-    };
-  });
-}
-
-// Runs verification and returns only the survivors, plus a report of what
-// was rejected and why. The layer-1 static checks (free, no API call)
-// always run; layer 2 (the batched LLM re-verify call) only runs for scoped
-// reviews (see runTargetedCodeReview) — small enough to comfortably fit
-// within Azure Static Web Apps' managed-API proxy timeout.
-async function verifyAndFilterFindings(findings, source) {
+// Runs the free layer-1 static checks (no API call) and returns the
+// survivors, plus a report of what was rejected and why. There used to
+// also be a layer-2 LLM re-verification pass (a second Claude call judging
+// each finding against its source), but even a small/scoped review chaining
+// two-to-three sequential Claude calls in one HTTP request was confirmed
+// live to exceed Azure Static Web Apps' managed-API proxy timeout (it
+// returned the proxy's own generic "Backend call failure", not an
+// application error) — reliably fitting inside that timeout mattered more
+// here than the extra confidence a second AI pass gave, so this app keeps
+// only the free check.
+function verifyAndFilterFindings(findings, source) {
   const staticResult = staticVerifyFindings(findings, source);
-  const verified = await verifyFindingsWithLLM(staticResult.kept, source);
-  const refuted = verified.filter((f) => f.verify && f.verify.verdict === "REFUTED");
-  const final = verified.filter((f) => !f.verify || f.verify.verdict !== "REFUTED");
   return {
-    findings: final,
+    findings: staticResult.kept,
     report: {
       generated: findings.length,
       staticRejected: staticResult.dropped.map((d) => ({ title: d.finding.title, reasons: d.reasons })),
-      llmRefuted: refuted.map((f) => ({ title: f.title, reason: f.verify.reason })),
     },
   };
 }
@@ -472,37 +366,80 @@ async function runReviewPrompt(promptBody, effort) {
   return findings.map((f) => ({ ...f, file: REVIEW_TARGET_FILE }));
 }
 
-// Asks Claude to pick which function(s) — out of the whole-file index — are
-// actually relevant to a free-text problem description, instead of naive
-// keyword matching.
-async function selectRelevantFunctionsViaLLM(indexEntries, description) {
-  if (!indexEntries.length) return { matched: [], note: "" };
+// Picks function(s) relevant to a free-text description using local keyword
+// matching against each function's name and leading-comment summary — no
+// API call. This used to be a Claude call (semantic matching, better at
+// e.g. matching "how discounts are calculated" to a function with no
+// literal word overlap), but running it before the review call itself
+// meant every targeted review chained two-to-three sequential Claude calls
+// in one HTTP request, which was confirmed live to exceed Azure Static Web
+// Apps' managed-API proxy timeout even though each individual call was
+// small and fast. A plain keyword match is less clever, but the review
+// call that follows still gets the surrounding lines of any function it
+// picks, so a slightly imprecise match is rarely a wasted one.
+const SELECTION_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "in", "on", "to", "for", "is", "are", "was", "were",
+  "this", "that", "it", "its", "with", "how", "does", "do", "when", "why", "what",
+  "flow", "page", "code", "logic", "area", "review", "function", "bug", "issue",
+]);
 
-  const listing = indexEntries.map((e) => "- " + e.name + " — " + e.summary).join("\n");
-  const prompt =
-    "Here is an index of every function in a JavaScript web app (name and one-line summary only, not the code):\n\n" +
-    listing +
-    '\n\nA user described this problem/area to review:\n"' + description + '"\n\n' +
-    "Pick ONLY the function(s) from the list above that are actually relevant to that description — do not " +
-    'invent function names that are not in the list. If nothing in the list is genuinely relevant, return an ' +
-    'empty "matched" array and use "note" to briefly explain what\'s missing or suggest a more specific way to ' +
-    "describe the area, since no match means nothing gets reviewed this time.\n\n" +
-    "Return ONLY a JSON object (no other text, no markdown fences):\n" +
-    '{\n  "matched": ["exact function name from the list", ...],\n' +
-    '  "note": "why these were picked, or what theme to focus on if none matched"\n}';
+// Splits an identifier or sentence into lowercase word tokens, breaking on
+// camelCase boundaries as well as spaces/punctuation — "openCodeFixModal"
+// becomes ["open","code","fix","modal"]. This is what makes token matching
+// (below) safe: comparing whole tokens instead of raw substrings means the
+// term "fix" matches the real word "Fix" inside a camelCase name, but does
+// NOT also match "fix" hiding inside "toFixed", "prefix", or "suffix" —
+// none of those split into a standalone "fix" token, since they're a single
+// lowercase run with no internal case change to split on. An earlier
+// version of this function used plain substring search and matched "fix"
+// (from a "fix PR" description) against `n.toFixed(1)` in unrelated
+// formatting helpers — confirmed live, not just a theoretical risk.
+function tokenize(text) {
+  return String(text || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .match(/[a-z0-9]+/g) || [];
+}
 
-  let parsed;
-  try {
-    parsed = await askForJson(prompt, SelectionSchema, "object", "medium", 700);
-  } catch (e) {
-    return { matched: [], note: "" };
+// True for an exact token match, or a simple singular/plural or verb-form
+// variant ("picker"~"pickers", "review"~"reviewing") — never for one short
+// token that just happens to prefix a longer, unrelated one. Both a minimum
+// length and a maximum length gap are required: without them, a token like
+// the trailing "p" that camelCase-splitting pulls out of "pctBadgeP" would
+// trivially prefix-match almost anything ("picker".startsWith("p")) —
+// confirmed live, this is what made "fix" match "toFixed" comments before
+// tokenizing, and what made a single-letter split token match unrelated
+// words after tokenizing but before this length guard.
+function tokensRelated(a, b) {
+  if (a === b) return true;
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length <= b.length ? b : a;
+  if (shorter.length < 4 || longer.length - shorter.length > 4) return false;
+  return longer.startsWith(shorter);
+}
+
+function selectRelevantFunctionsLocally(indexEntries, description) {
+  const terms = Array.from(new Set(tokenize(description).filter((w) => w.length > 2 && !SELECTION_STOPWORDS.has(w))));
+  if (!terms.length) {
+    return { matched: [], note: "Describe the area using specific words — a function name, a UI label, or a behavior — rather than general terms." };
   }
 
-  // Defensive: only trust matches that actually exist in the index sent —
-  // never let a hallucinated function name silently scope the review.
-  const validNames = new Set(indexEntries.map((e) => e.name));
-  const matched = parsed.matched.filter((n) => validNames.has(n));
-  return { matched, note: parsed.note || "" };
+  const scored = indexEntries
+    .map((e) => {
+      const haystackTokens = tokenize(e.name).concat(tokenize(e.summary));
+      const score = terms.reduce((s, t) => {
+        const hit = haystackTokens.some((tok) => tokensRelated(tok, t));
+        return s + (hit ? 1 : 0);
+      }, 0);
+      return { name: e.name, score };
+    })
+    .filter((e) => e.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (!scored.length) {
+    return { matched: [], note: 'Nothing in semantic-app/index.html matched a word in "' + description + '" — try naming a specific function, UI label, or behavior.' };
+  }
+  return { matched: scored.slice(0, 8).map((e) => e.name), note: "" };
 }
 
 // Scoped to the function(s) judged relevant to a user-supplied description.
@@ -520,12 +457,7 @@ async function runTargetedCodeReview(description) {
   const { content: source } = await fetchFileContent(REVIEW_TARGET_FILE);
   const { lines, blocks, index } = buildFunctionIndex(source);
 
-  let selection = { matched: [], note: "" };
-  try {
-    selection = await selectRelevantFunctionsViaLLM(index, description);
-  } catch (e) {
-    // Selection step failing is treated the same as a genuine no-match below.
-  }
+  const selection = selectRelevantFunctionsLocally(index, description);
   const matched = selection.matched.length > 0;
 
   if (!matched) {
@@ -565,11 +497,11 @@ async function runTargetedCodeReview(description) {
     FINDINGS_JSON_INSTRUCTIONS +
     content;
 
-  // Scoped to a handful of functions (never the whole file, see above), so
-  // this can afford both the higher-effort review and the full two-pass
-  // LLM verification within Azure's proxy timeout.
+  // One Claude call total for this request (see selectRelevantFunctionsLocally
+  // and verifyAndFilterFindings above for why) — scoped to a handful of
+  // functions, never the whole file, so it can afford high effort.
   const findings = await runReviewPrompt(prompt, "high");
-  const verifyResult = await verifyAndFilterFindings(findings, source);
+  const verifyResult = verifyAndFilterFindings(findings, source);
 
   return {
     findings: verifyResult.findings,
