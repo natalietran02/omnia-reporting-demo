@@ -4695,10 +4695,17 @@
         apiKeyCardHtml = '<div class="oc-kpi-card muted"><div class="oc-kpi-label">Anthropic API key</div><div class="oc-kpi-value" style="font-size:16px;">Loading…</div></div>';
         dailySpendCardHtml = monthlySpendCardHtml = '';
       } else {
+        // Spend is tracked in memory per running instance, not in a shared
+        // ledger (see lib/anthropic.js) — whichever instance happens to
+        // answer this GET may not be the one that ran an earlier AI call,
+        // so a low or $0 figure here doesn't necessarily mean nothing was
+        // spent, just that this instance hasn't seen it. Said plainly on
+        // every card rather than tacking on a technical "(no limit set)"
+        // when there's simply no cap configured.
+        var spendCaveatHtml = '<div class="oc-caption" style="margin-top:4px;">Only counts calls this instance has handled — not a running total</div>';
         apiKeyCardHtml = '<div class="oc-kpi-card"><div class="oc-kpi-label">Anthropic API key</div><div class="oc-kpi-value" style="font-size:16px;">' + (budget.hasApiKey ? 'Set' : 'Missing') + '</div></div>';
-        dailySpendCardHtml = '<div class="oc-kpi-card"><div class="oc-kpi-label">AI spend — today</div><div class="oc-kpi-value" style="font-size:16px;">' + fmtUsd2(budget.dailySpentUsd) + (budget.dailyLimitUsd != null ? ' / ' + fmtUsd2(budget.dailyLimitUsd) : ' (no limit set)') + '</div></div>';
-        monthlySpendCardHtml = '<div class="oc-kpi-card"><div class="oc-kpi-label">AI spend — this month</div><div class="oc-kpi-value" style="font-size:16px;">' + fmtUsd2(budget.monthlySpentUsd) + (budget.monthlyLimitUsd != null ? ' / ' + fmtUsd2(budget.monthlyLimitUsd) : ' (no limit set)') + '</div>' +
-          (budget.durable === false ? '<div class="oc-caption" style="margin-top:4px;">Resets on cold start — not a durable ledger</div>' : '') + '</div>';
+        dailySpendCardHtml = '<div class="oc-kpi-card"><div class="oc-kpi-label">AI spend — today</div><div class="oc-kpi-value" style="font-size:16px;">' + fmtUsd2(budget.dailySpentUsd) + (budget.dailyLimitUsd != null ? ' / ' + fmtUsd2(budget.dailyLimitUsd) : '') + '</div>' + spendCaveatHtml + '</div>';
+        monthlySpendCardHtml = '<div class="oc-kpi-card"><div class="oc-kpi-label">AI spend — this month</div><div class="oc-kpi-value" style="font-size:16px;">' + fmtUsd2(budget.monthlySpentUsd) + (budget.monthlyLimitUsd != null ? ' / ' + fmtUsd2(budget.monthlyLimitUsd) : '') + '</div>' + spendCaveatHtml + '</div>';
       }
 
       var kpiHtml = '<section class="oc-kpi-grid">' +
