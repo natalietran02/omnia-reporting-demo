@@ -280,6 +280,7 @@
   .oc-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(1,67,72,0.55); z-index: 200; align-items: flex-start; justify-content: center; padding: 60px 20px; overflow-y: auto; }
   .oc-modal-overlay.open { display: flex; }
   .oc-modal { background: var(--bg); border-radius: var(--radius-xl); width: 100%; max-width: 640px; box-shadow: var(--shadow-3); overflow: hidden; }
+  .oc-modal.oc-modal-wide { max-width: 880px; }
   .oc-modal-head { background: var(--bg-inverse); color: var(--fg-on-dark-1); padding: 18px 24px; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
   .oc-modal-head h3 { margin: 0 0 4px; font-size: 16px; font-weight: 700; }
   .oc-modal-head .oc-modal-meta { font-size: 11px; color: var(--fg-on-dark-3); }
@@ -297,6 +298,16 @@
   .oc-ask-status { font-size: 12.5px; color: var(--fg3); min-height: 16px; }
   .oc-ask-status.oc-ask-error { color: var(--oc-coral); }
   .oc-ask-status.oc-ask-ok { color: var(--oc-mid-teal); }
+  .oc-diff-block { font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word; border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: 12px; max-height: 220px; overflow-y: auto; }
+  .oc-diff-old { background: var(--oc-coral-soft); }
+  .oc-diff-new { background: var(--oc-mint-soft); }
+  .oc-finding-row { border-bottom: 1px solid var(--rule); padding: 12px 0; }
+  .oc-finding-row:last-child { border-bottom: none; }
+  .oc-sev-chip { font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: var(--radius-sm); text-transform: uppercase; margin-right: 8px; }
+  .oc-sev-chip.critical { background: #FEE2E2; color: #c62828; }
+  .oc-sev-chip.high { background: #FFF3E0; color: #e65100; }
+  .oc-sev-chip.medium { background: #FFFDE7; color: #b45309; }
+  .oc-sev-chip.low { background: var(--oc-mint-soft); color: #065f46; }
   .oc-editor-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--rule); font-size: 13px; gap: 10px; }
   .oc-editor-row:last-child { border-bottom: none; }
   .oc-role-chip { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: var(--radius-pill); text-transform: uppercase; background: var(--bg-muted); color: var(--fg2); flex-shrink: 0; }
@@ -400,6 +411,27 @@
       <div class="oc-modal-foot">
         <button class="oc-btn oc-btn-ghost" id="access-close-btn-2">Close</button>
         <button class="oc-btn oc-btn-primary" id="access-save-btn">Add / Update</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="code-fix-modal-overlay" class="oc-modal-overlay">
+    <div class="oc-modal oc-modal-wide">
+      <div class="oc-modal-head">
+        <div><h3 id="code-fix-modal-title"></h3><div class="oc-modal-meta" id="code-fix-modal-meta"></div></div>
+        <button class="oc-modal-close" id="code-fix-close-btn">&#10005;</button>
+      </div>
+      <div class="oc-modal-body">
+        <div class="oc-caption" id="code-fix-explanation" style="margin-bottom:10px;"></div>
+        <div class="oc-field-label">Before</div>
+        <div class="oc-diff-block oc-diff-old" id="code-fix-old"></div>
+        <div class="oc-field-label">After</div>
+        <div class="oc-diff-block oc-diff-new" id="code-fix-new"></div>
+        <div id="code-fix-status" class="oc-ask-status"></div>
+      </div>
+      <div class="oc-modal-foot">
+        <button class="oc-btn oc-btn-ghost" id="code-fix-close-btn-2">Close</button>
+        <button class="oc-btn oc-btn-primary" id="code-fix-create-pr-btn" disabled>Create fix PR</button>
       </div>
     </div>
   </div>
@@ -1110,8 +1142,14 @@
       email: null,
       isAccessAdmin: false,
       modal: { kind: null },
-      health: { testEmail: '', testEmailSending: false, testEmailStatus: null },
+      health: {
+        testEmail: '', testEmailSending: false, testEmailStatus: null,
+        commentary: null, commentaryLoading: false, commentaryError: null,
+        aiBudget: null, aiBudgetLoading: false, aiBudgetError: null,
+      },
       fixPrs: { list: null, loading: false, error: null, actionInFlight: {} },
+      codeReviewMode: 'full',
+      codeReview: { targetedDesc: '', running: false, error: null, result: null },
     };
 
     var NAV_ITEMS = [
@@ -4340,6 +4378,244 @@
     // internal SWA-to-Function service token before the request reaches the
     // function, confirmed via a live diagnostic (the function was seeing a
     // token with an azurewebsites.net audience, never the one sent here).
+    // Shared by every admin-gated call below (fix-PRs, AI commentary/budget,
+    // code review) so each one isn't re-deriving the same token+header+
+    // error-unwrap boilerplate.
+    async function callAdminApi(path, options) {
+      var token = await getFeedbackGraphToken();
+      var opts = Object.assign({}, options);
+      opts.headers = Object.assign({ 'x-omnia-graph-token': token }, (options && options.headers) || {});
+      var resp = await fetch(path, opts);
+      var data = await resp.json().catch(function () { return {}; });
+      if (!resp.ok) throw new Error(data.error || ('Request failed (' + resp.status + ')'));
+      return data;
+    }
+
+    // ---- AI commentary (ported from Code.js's getClaudeCommentary()) ----
+    // Code.js read data_key_metrics_monthly/data_pl/data_powerbi_unified_fact
+    // straight off the spreadsheet, server-side. Here the reporting data
+    // already lives client-side (fetched from the Power BI semantic model
+    // via DAX queries — see loadReport()), so this rebuilds the same
+    // per-OpCo/per-month "Revenue $Xk, GP Y%, HC Z, Utilisation W%, ADR $V"
+    // summary text and sends it to the Function app, which just forwards it
+    // to Claude with the analyst system prompt.
+    function buildCommentaryDataSummary(months) {
+      months = months || 6;
+      var entities = COMBINED_ENTITIES.length ? COMBINED_ENTITIES : ENTITIES.filter(function (e) { return e !== COMBINED_ENTITY_LABEL; });
+      var scopeEnd = periodOf(currentMonthWithData());
+      var periodsWanted = MONTH_UNIVERSE.filter(function (m) { return periodOf(m) <= scopeEnd; }).slice(-months).map(periodOf);
+
+      var sections = entities.map(function (entity) {
+        var revByPeriod = {}, gpByPeriod = {}, utilByPeriod = {}, hcByPeriod = {}, adrByPeriod = {};
+
+        (RAW.revenueTarget || []).filter(function (r) { return r.entity === entity; }).forEach(function (r) {
+          var p = periodOf(r.month_date);
+          if (!p) return;
+          revByPeriod[p] = (revByPeriod[p] || 0) + (Number(r.total_revenue) || 0);
+        });
+
+        // Same GP% formula as runDataQualityChecks()'s gpBounds check —
+        // direct_costs_actual is stored negative, so it's added, not subtracted.
+        (RAW.pl || []).filter(function (r) { return r.Omnia_Company === entity; }).forEach(function (r) {
+          var p = periodOf(r.month);
+          if (!p || isBlankValue(r.direct_costs_actual)) return;
+          gpByPeriod[p] = gpByPeriod[p] || { rev: 0, gp: 0 };
+          var rev = Number(r.revenue_actual) || 0;
+          gpByPeriod[p].rev += rev;
+          gpByPeriod[p].gp += rev + (Number(r.direct_costs_actual) || 0);
+        });
+
+        // Same weighting as runDataQualityChecks()'s utilBounds check.
+        (RAW.utilisation || []).filter(function (r) { return r.Omnia_Company === entity; }).forEach(function (r) {
+          var p = periodOf(r.month);
+          if (!p) return;
+          utilByPeriod[p] = utilByPeriod[p] || { billed: 0, max: 0 };
+          utilByPeriod[p].billed += Number(r.invoiced_days) || 0;
+          utilByPeriod[p].max += Number(r.available_days) || 0;
+          hcByPeriod[p] = hcByPeriod[p] || {};
+          if (r.userId) hcByPeriod[p][r.userId] = true;
+        });
+
+        (RAW.unifiedFact || []).filter(function (r) { return r.entity === entity; }).forEach(function (r) {
+          var p = periodOf(r.month_date);
+          if (!p) return;
+          adrByPeriod[p] = adrByPeriod[p] || { rev: 0, days: 0 };
+          adrByPeriod[p].rev += Number(r.total_revenue) || 0;
+          adrByPeriod[p].days += Number(r.total_days) || 0;
+        });
+
+        var lines = periodsWanted.map(function (p) {
+          var rev = revByPeriod[p] || 0;
+          var gp = gpByPeriod[p];
+          var gpPct = gp && gp.rev > 0 ? ((gp.gp / gp.rev) * 100).toFixed(1) : 'N/A';
+          var util = utilByPeriod[p];
+          var utilPct = util && util.max > 0 ? ((util.billed / util.max) * 100).toFixed(1) : 'N/A';
+          var hc = hcByPeriod[p] ? Object.keys(hcByPeriod[p]).length : 0;
+          var adr = adrByPeriod[p];
+          var adrVal = adr && adr.days > 0 ? Math.round(adr.rev / adr.days) : null;
+          return p + ': Revenue $' + Math.round(rev / 1000) + 'k, GP ' + gpPct + '%, HC ' + (hc || 'N/A') + ', Utilisation ' + utilPct + '%, ADR ' + (adrVal != null ? '$' + adrVal : 'N/A');
+        });
+
+        return entity + ':\n' + (lines.length ? lines.join('\n') : '(no data)');
+      });
+
+      return sections.join('\n\n');
+    }
+
+    async function loadAiCommentary() {
+      var hs = STATE.health;
+      hs.commentaryLoading = true;
+      hs.commentaryError = null;
+      renderPage();
+      try {
+        var summary = buildCommentaryDataSummary(6);
+        var data = await callAdminApi('/api/ai-commentary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dataSummary: summary }),
+        });
+        hs.commentary = data.commentary;
+      } catch (e) {
+        hs.commentaryError = e && e.message ? e.message : String(e);
+      }
+      hs.commentaryLoading = false;
+      renderPage();
+    }
+
+    async function loadAiBudget() {
+      var hs = STATE.health;
+      hs.aiBudgetLoading = true;
+      hs.aiBudgetError = null;
+      try {
+        hs.aiBudget = await callAdminApi('/api/ai-budget');
+      } catch (e) {
+        hs.aiBudgetError = e && e.message ? e.message : String(e);
+      }
+      hs.aiBudgetLoading = false;
+      renderPage();
+    }
+
+    // ---- AI code review (ported from Code.js's runCodeReview()/
+    // runTargetedCodeReview()) — the review itself, verification, and fix
+    // generation all run server-side (semantic-app/api/src/lib/codeReview.js);
+    // this is just the run/display/wire layer. ----
+    async function runFullCodeReview() {
+      var cr = STATE.codeReview;
+      cr.running = true;
+      cr.error = null;
+      cr.result = null;
+      renderPage();
+      try {
+        cr.result = await callAdminApi('/api/code-review', { method: 'POST' });
+      } catch (e) {
+        cr.error = e && e.message ? e.message : String(e);
+      }
+      cr.running = false;
+      renderPage();
+    }
+
+    async function runTargetedCodeReviewNow() {
+      var cr = STATE.codeReview;
+      if (!cr.targetedDesc.trim()) return;
+      cr.running = true;
+      cr.error = null;
+      cr.result = null;
+      renderPage();
+      try {
+        cr.result = await callAdminApi('/api/code-review/targeted', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description: cr.targetedDesc }),
+        });
+      } catch (e) {
+        cr.error = e && e.message ? e.message : String(e);
+      }
+      cr.running = false;
+      renderPage();
+    }
+
+    // ---- Code-fix diff modal (static markup — see #code-fix-modal-overlay
+    // — wired once below, same pattern as the feedback/access modals) ----
+    var codeFixModalState = { finding: null, patch: null };
+
+    async function openCodeFixModal(finding) {
+      var overlay = document.getElementById('code-fix-modal-overlay');
+      var titleEl = document.getElementById('code-fix-modal-title');
+      var metaEl = document.getElementById('code-fix-modal-meta');
+      var explEl = document.getElementById('code-fix-explanation');
+      var oldEl = document.getElementById('code-fix-old');
+      var newEl = document.getElementById('code-fix-new');
+      var statusEl = document.getElementById('code-fix-status');
+      var createBtn = document.getElementById('code-fix-create-pr-btn');
+
+      codeFixModalState.finding = null;
+      codeFixModalState.patch = null;
+      titleEl.textContent = 'Generating fix…';
+      metaEl.textContent = finding.file + ' · ' + finding.location;
+      explEl.textContent = '';
+      oldEl.textContent = '';
+      newEl.textContent = '';
+      statusEl.textContent = '';
+      statusEl.className = 'oc-ask-status';
+      createBtn.disabled = true;
+      createBtn.textContent = 'Create fix PR';
+      overlay.classList.add('open');
+
+      try {
+        var data = await callAdminApi('/api/code-fix', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ finding: finding }),
+        });
+        codeFixModalState.finding = finding;
+        codeFixModalState.patch = data.patch;
+        titleEl.textContent = finding.title;
+        explEl.textContent = data.patch.explanation || '';
+        oldEl.textContent = data.patch.old_string;
+        newEl.textContent = data.patch.new_string;
+        createBtn.disabled = false;
+      } catch (e) {
+        titleEl.textContent = 'Could not generate fix';
+        statusEl.textContent = e && e.message ? e.message : String(e);
+        statusEl.className = 'oc-ask-status oc-ask-error';
+      }
+    }
+
+    (function () {
+      var overlay = document.getElementById('code-fix-modal-overlay');
+      function closeModal() { overlay.classList.remove('open'); }
+      document.getElementById('code-fix-close-btn').addEventListener('click', closeModal);
+      document.getElementById('code-fix-close-btn-2').addEventListener('click', closeModal);
+      overlay.addEventListener('click', function (e) { if (e.target === overlay) closeModal(); });
+
+      document.getElementById('code-fix-create-pr-btn').addEventListener('click', async function () {
+        var btn = this;
+        var statusEl = document.getElementById('code-fix-status');
+        if (!codeFixModalState.finding || !codeFixModalState.patch) return;
+        btn.disabled = true;
+        btn.textContent = 'Creating PR…';
+        statusEl.textContent = '';
+        statusEl.className = 'oc-ask-status';
+        try {
+          var res = await callAdminApi('/api/fix-prs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ finding: codeFixModalState.finding, patch: codeFixModalState.patch }),
+          });
+          statusEl.textContent = 'PR created: #' + res.pr_number;
+          statusEl.className = 'oc-ask-status oc-ask-ok';
+          btn.textContent = 'Created';
+          await loadFixPrs(); // refreshes the Pending fix PRs panel below
+          setTimeout(closeModal, 1200);
+        } catch (e) {
+          statusEl.textContent = e && e.message ? e.message : String(e);
+          statusEl.className = 'oc-ask-status oc-ask-error';
+          btn.disabled = false;
+          btn.textContent = 'Create fix PR';
+        }
+      });
+    })();
+
     async function loadFixPrs() {
       var hs = STATE.fixPrs;
       hs.loading = true;
@@ -4419,14 +4695,28 @@
       var checks = runDataQualityChecks();
       var appChecks = runAppSpecificChecks();
 
+      var budget = STATE.health.aiBudget;
+      function fmtUsd2(n) { return '$' + (Number(n) || 0).toFixed(2); }
+      var apiKeyCardHtml, dailySpendCardHtml, monthlySpendCardHtml;
+      if (STATE.health.aiBudgetError) {
+        apiKeyCardHtml = '<div class="oc-kpi-card muted" title="' + escAttr(STATE.health.aiBudgetError) + '"><div class="oc-kpi-label">Anthropic API key</div><div class="oc-kpi-value" style="font-size:16px;">Unknown</div></div>';
+        dailySpendCardHtml = monthlySpendCardHtml = '';
+      } else if (!budget) {
+        apiKeyCardHtml = '<div class="oc-kpi-card muted"><div class="oc-kpi-label">Anthropic API key</div><div class="oc-kpi-value" style="font-size:16px;">Loading…</div></div>';
+        dailySpendCardHtml = monthlySpendCardHtml = '';
+      } else {
+        apiKeyCardHtml = '<div class="oc-kpi-card"><div class="oc-kpi-label">Anthropic API key</div><div class="oc-kpi-value" style="font-size:16px;">' + (budget.hasApiKey ? 'Set' : 'Missing') + '</div></div>';
+        dailySpendCardHtml = '<div class="oc-kpi-card"><div class="oc-kpi-label">AI spend — today</div><div class="oc-kpi-value" style="font-size:16px;">' + fmtUsd2(budget.dailySpentUsd) + (budget.dailyLimitUsd != null ? ' / ' + fmtUsd2(budget.dailyLimitUsd) : ' (no limit set)') + '</div></div>';
+        monthlySpendCardHtml = '<div class="oc-kpi-card"><div class="oc-kpi-label">AI spend — this month</div><div class="oc-kpi-value" style="font-size:16px;">' + fmtUsd2(budget.monthlySpentUsd) + (budget.monthlyLimitUsd != null ? ' / ' + fmtUsd2(budget.monthlyLimitUsd) : ' (no limit set)') + '</div>' +
+          (budget.durable === false ? '<div class="oc-caption" style="margin-top:4px;">Resets on cold start — not a durable ledger</div>' : '') + '</div>';
+      }
+
       var kpiHtml = '<section class="oc-kpi-grid">' +
         '<div class="oc-kpi-card"><div class="oc-kpi-label">Overall status</div><div class="oc-kpi-value">' + (h.status === 'ok' ? 'OK' : 'Issues') + '</div></div>' +
         '<div class="oc-kpi-card"><div class="oc-kpi-label">Data queries healthy</div><div class="oc-kpi-value">' + h.queriesOk + ' / ' + h.queriesTotal + '</div></div>' +
         '<div class="oc-kpi-card"><div class="oc-kpi-label">Latest data period</div><div class="oc-kpi-value">' + (h.latestPeriod || '—') + '</div>' +
           (h.daysSinceUpdate != null ? '<div class="oc-caption">' + h.daysSinceUpdate + ' days ago</div>' : '') + '</div>' +
-        '<div class="oc-kpi-card muted" title="No AI integration in this app — nothing to report"><div class="oc-kpi-label">Anthropic API key</div><div class="oc-kpi-value" style="font-size:16px;">Not configured</div></div>' +
-        '<div class="oc-kpi-card muted" title="No AI integration in this app — nothing to report"><div class="oc-kpi-label">AI spend — today</div><div class="oc-kpi-value" style="font-size:16px;">N/A</div></div>' +
-        '<div class="oc-kpi-card muted" title="No AI integration in this app — nothing to report"><div class="oc-kpi-label">AI spend — this month</div><div class="oc-kpi-value" style="font-size:16px;">N/A</div></div>' +
+        apiKeyCardHtml + dailySpendCardHtml + monthlySpendCardHtml +
       '</section>';
 
       var tabsHtml = '<table class="oc-table"><thead><tr><th>Query</th><th>Status</th><th>Rows</th></tr></thead><tbody>' +
@@ -4491,17 +4781,72 @@
         (hs.testEmailStatus ? '<div class="oc-caption" style="margin-top:8px;">' + escHtml(hs.testEmailStatus) + '</div>' : '') +
       '</section>';
 
+      var commentaryHtml = '<section class="oc-panel"><div class="oc-panel-head"><h3 class="oc-panel-title">AI commentary</h3>' +
+          '<button class="oc-btn oc-btn-ghost" id="health-commentary-btn"' + (hs.commentaryLoading ? ' disabled' : '') + '>' + (hs.commentaryLoading ? 'Loading…' : 'Refresh') + '</button></div>' +
+        (hs.commentary ? '<div class="oc-note">' + escHtml(hs.commentary).replace(/\n/g, '<br>') + '</div>'
+          : hs.commentaryError ? '<div class="oc-ask-status oc-ask-error">' + escHtml(hs.commentaryError) + '</div>'
+          : '<div class="oc-caption">Click Refresh to ask Claude for anomaly commentary across the last 6 months.</div>') +
+      '</section>';
+
       return kpiHtml +
         '<section class="oc-panel"><h3 class="oc-panel-title">Data queries</h3>' + tabsHtml + '</section>' +
         '<section class="oc-panel"><h3 class="oc-panel-title">Data quality</h3>' +
           '<div class="oc-panel-sub">Automated checks across business metrics and the underlying data pipeline, confirming the figures are sound and the source tables are correctly linked.</div>' +
           renderCriteriaChecklist(checks.concat(appChecks).concat(runSelfTestCriteria())) +
         '</section>' +
-        '<section class="oc-panel" style="opacity:0.6;" title="No AI integration in this app — nothing to report"><h3 class="oc-panel-title">AI commentary</h3>' +
-          '<div class="oc-caption">Not configured — this app has no AI integration to generate anomaly commentary from.</div>' +
-        '</section>' +
+        commentaryHtml +
+        renderCodeReviewPanel() +
         renderFixPrsPanel() +
         adminActionsHtml;
+    }
+
+    // ---- AI code review panel ----
+    function renderCodeReviewPanel() {
+      var cr = STATE.codeReview;
+      var mode = STATE.codeReviewMode || 'full';
+
+      var modeToggleHtml = renderPillToggle([{ key: 'full', label: 'Full review' }, { key: 'targeted', label: 'Targeted' }], 'codeReviewMode');
+
+      var actionHtml;
+      if (mode === 'targeted') {
+        actionHtml =
+          '<label class="oc-field-label" style="margin-top:12px;">Describe the area to review</label>' +
+          '<textarea class="oc-feedback-textarea" id="cr-targeted-desc" placeholder="e.g. the period picker\'s comparison-basis logic" style="min-height:70px;">' + escHtml(cr.targetedDesc) + '</textarea>' +
+          '<button class="oc-btn oc-btn-primary" id="cr-run-targeted-btn" style="margin-top:8px;"' + (cr.running ? ' disabled' : '') + '>' + (cr.running ? 'Reviewing…' : 'Review this area') + '</button>';
+      } else {
+        actionHtml = '<button class="oc-btn oc-btn-primary" id="cr-run-full-btn" style="margin-top:12px;"' + (cr.running ? ' disabled' : '') + '>' + (cr.running ? 'Reviewing…' : 'Run full review') + '</button>';
+      }
+
+      var resultHtml = '';
+      if (cr.error) {
+        resultHtml = '<div class="oc-ask-status oc-ask-error" style="margin-top:12px;">' + escHtml(cr.error) + '</div>';
+      } else if (cr.result) {
+        var findings = cr.result.findings || [];
+        var scopeNoteHtml = (cr.result.scope && !cr.result.scope.matched && cr.result.scope.note)
+          ? '<div class="oc-caption" style="margin-top:8px;">No specific function matched that description — reviewed the whole file with a focus on: ' + escHtml(cr.result.scope.note) + '</div>'
+          : '';
+        resultHtml = '<div style="margin-top:14px;">' +
+          '<div class="oc-caption">Reviewed ' + escHtml((cr.result.filesReviewed || []).join(', ')) + ' · ' + new Date(cr.result.reviewedAt).toLocaleString() + '</div>' +
+          scopeNoteHtml +
+          (findings.length === 0
+            ? '<div class="oc-caption" style="margin-top:10px;">No findings.</div>'
+            : '<div style="margin-top:10px;">' + findings.map(function (f, i) {
+                return '<div class="oc-finding-row">' +
+                  '<span class="oc-sev-chip ' + f.severity + '">' + escHtml(f.severity) + '</span>' +
+                  '<span style="font-weight:700;">' + escHtml(f.title) + '</span>' +
+                  '<div class="oc-caption">' + escHtml(f.location) + '</div>' +
+                  '<div style="font-size:13px; color:var(--fg2); margin:6px 0;">' + escHtml(f.description) + '</div>' +
+                  '<div style="font-size:12px; color:var(--oc-mid-teal); font-style:italic;">' + escHtml(f.suggestion) + '</div>' +
+                  '<button class="oc-btn oc-btn-ghost" style="margin-top:8px;" data-fix-idx="' + i + '">Generate fix</button>' +
+                '</div>';
+              }).join('') + '</div>') +
+        '</div>';
+      }
+
+      return '<section class="oc-panel"><h3 class="oc-panel-title">AI code review</h3>' +
+        '<div class="oc-panel-sub">Reviews semantic-app/index.html with Claude, statically and re-verifies each finding against the real source before showing it, and can open a fix PR straight into the Pending fix PRs panel below.</div>' +
+        modeToggleHtml + actionHtml + resultHtml +
+      '</section>';
     }
 
     function wireHealthPage(el) {
@@ -4550,6 +4895,28 @@
       // the re-render loadFixPrs() itself triggers (via renderPage()) can't
       // cause this to fire again and again.
       if (fp.list === null && !fp.loading && !fp.error) loadFixPrs();
+
+      // AI spend/budget KPI cards — same auto-load-once guard as fix-PRs above.
+      if (hs.aiBudget === null && !hs.aiBudgetLoading && !hs.aiBudgetError) loadAiBudget();
+
+      var commentaryBtn = el.querySelector('#health-commentary-btn');
+      if (commentaryBtn) commentaryBtn.addEventListener('click', loadAiCommentary);
+
+      // AI code review — mode toggle itself is wired generically by
+      // wirePillToggles(el) in renderPage() (STATE.codeReviewMode is a flat
+      // top-level key, same convention as every other pill toggle).
+      var targetedDescEl = el.querySelector('#cr-targeted-desc');
+      if (targetedDescEl) targetedDescEl.addEventListener('input', function () { STATE.codeReview.targetedDesc = targetedDescEl.value; });
+      var runFullBtn = el.querySelector('#cr-run-full-btn');
+      if (runFullBtn) runFullBtn.addEventListener('click', runFullCodeReview);
+      var runTargetedBtn = el.querySelector('#cr-run-targeted-btn');
+      if (runTargetedBtn) runTargetedBtn.addEventListener('click', runTargetedCodeReviewNow);
+      el.querySelectorAll('[data-fix-idx]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var idx = Number(btn.getAttribute('data-fix-idx'));
+          openCodeFixModal(STATE.codeReview.result.findings[idx]);
+        });
+      });
     }
 
     // ---- Page dispatch (Phase 2 will replace each remaining placeholder
